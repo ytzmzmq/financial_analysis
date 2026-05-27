@@ -28,16 +28,14 @@ jobs:
         id: monitor
         env:
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
-          PUSHDEER_KEY: ${{ secrets.PUSHDEER_KEY }}
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
           python app/notify.py 2>&1 | tee output.txt || true
-          echo "--- parsing alert ---"
-          ALERT=$(grep -i 'silent\|yellow\|red' output.txt | grep -oP '\[(SILENT|YELLOW|RED)\]' | head -1 | tr -d '[]' | tr '[:upper:]' '[:lower:]')
-          echo "alert=${ALERT:-silent}" >> $GITHUB_OUTPUT
-          SCORE=$(grep -oP 'Score: \d+' output.txt | head -1 | grep -oP '\d+')
-          echo "score=${SCORE:-0}" >> $GITHUB_OUTPUT
-          echo "Parsed: alert=${ALERT:-silent} score=${SCORE:-0}"
+          python app/ci_parse.py
+
+      - name: Load parsed values
+        id: parsed
+        run: |
+          cat alert_result.txt >> $GITHUB_OUTPUT
 
       - name: Generate dashboard
         run: python app/dashboard.py || true
@@ -47,26 +45,20 @@ jobs:
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
           git add dashboard.html data/processed/signal_history.csv 2>/dev/null || true
-          if ! git diff --staged --quiet; then
-            git commit -m "[auto] $(date +%Y-%m-%d) alert:${{ steps.monitor.outputs.alert }}"
-            git push || true
-          else
-            echo "No file changes"
-          fi
+          git diff --staged --quiet && echo "No changes" || (git commit -m "[auto] $(date +%Y-%m-%d) alert:${{ steps.parsed.outputs.alert }}" && git push || true)
 
       - name: Create Issue (RED only)
-        if: steps.monitor.outputs.alert == 'red'
+        if: steps.parsed.outputs.alert == 'red'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const output = fs.existsSync('output.txt') ? fs.readFileSync('output.txt', 'utf8').slice(0, 4000) : 'no output';
+            const output = fs.existsSync('output.txt') ? fs.readFileSync('output.txt', 'utf8').slice(0, 4000) : '';
             const date = new Date().toISOString().split('T')[0];
-            const score = '${{ steps.monitor.outputs.score }}';
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `ARMED! 医药板块 Score=${score} (${date})`,
+              title: `ARMED! 医药板块 Score=${{ steps.parsed.outputs.score }} (${date})`,
               body: '```\n' + output + '\n```\n\n历史 Armed 信号 13周期望收益 +8.4%',
               labels: ['armed', 'alert']
             });
