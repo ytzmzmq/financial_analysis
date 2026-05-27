@@ -17,12 +17,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug checkout
+        run: |
+          echo "Commit: $(git log --oneline -1)"
+          echo "=== turning_points.py L1-20 ==="
+          head -20 src/models/turning_points.py
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install
-        run: pip install pandas numpy scipy akshare openpyxl matplotlib
+        run: pip install pandas numpy scipy akshare openpyxl
 
       - name: Run monitor
         id: monitor
