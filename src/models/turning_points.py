@@ -13,7 +13,10 @@ import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
 from scipy.stats import percentileofscore
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 
 # ═══════════════════════════════════════════

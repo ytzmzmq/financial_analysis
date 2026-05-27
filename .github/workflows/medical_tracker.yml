@@ -22,7 +22,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install
-        run: pip install pandas numpy scipy akshare openpyxl
+        run: pip install pandas numpy scipy akshare openpyxl matplotlib
 
       - name: Run monitor
         id: monitor
