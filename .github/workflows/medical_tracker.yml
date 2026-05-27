@@ -27,6 +27,15 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Clear stale cache
+        run: find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; find . -name "*.pyc" -delete 2>/dev/null; echo "Cache cleared"
+
+      - name: Final verify file
+        run: |
+          echo "=== Commit ===" && git log --oneline -1
+          echo "=== L16-18 ===" && sed -n '14,20p' src/models/turning_points.py
+          echo "=== Grep matplotlib ===" && grep -n "matplotlib" src/models/turning_points.py || echo "NOT FOUND"
+
       - name: Install
         run: pip install pandas numpy scipy akshare openpyxl
 
