@@ -100,7 +100,12 @@ def run(dry_run: bool = False, test_push: bool = False):
         return
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 运行监控...")
-    sig = _compute(_load_data())
+    try:
+        sig = _compute(_load_data())
+    except Exception as e:
+        print(f"  数据拉取失败: {e}")
+        print(f"  [SILENT] 无法计算信号, 静默退出")
+        return
     alert = sig["alert"]
     score = sig["score"]
 
