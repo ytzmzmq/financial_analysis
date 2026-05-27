@@ -2,7 +2,7 @@ name: 医药板块每日监控 + 推送
 
 on:
   schedule:
-    - cron: '45 6 * * 1-5'           # 北京时间 14:45, 周一至周五
+    - cron: '45 6 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install
         run: pip install pandas numpy scipy akshare openpyxl
@@ -30,10 +29,12 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
           python app/notify.py 2>&1 | tee output.txt
-          ALERT=$(grep -oP '\[(RED|YELLOW|SILENT)\]' output.txt | head -1 | tr -d '[]')
-          echo "alert=${ALERT}" >> $GITHUB_OUTPUT
-          SCORE=$(grep -oP 'Score: \d+' output.txt | head -1 | grep -oP '\d+')
-          echo "score=${SCORE}" >> $GITHUB_OUTPUT
+          # 从 output.txt 提取 alert level (SILENT/YELLOW/RED)
+          ALERT=$(grep '^\s*\[.*\]' output.txt | head -1 | sed 's/.*\[//;s/\].*//' | tr '[:upper:]' '[:lower:]')
+          echo "alert=${ALERT:-silent}" >> $GITHUB_OUTPUT
+          SCORE=$(grep -o 'Score: [0-9]' output.txt | head -1 | grep -o '[0-9]')
+          echo "score=${SCORE:-0}" >> $GITHUB_OUTPUT
+          echo "alert=${ALERT:-silent}, score=${SCORE:-0}"
 
       - name: Generate dashboard
         run: python app/dashboard.py
@@ -49,7 +50,7 @@ jobs:
           fi
 
       - name: Create Issue on RED alert
-        if: steps.monitor.outputs.alert == 'RED'
+        if: steps.monitor.outputs.alert == 'red'
         uses: actions/github-script@v7
         with:
           script: |
@@ -59,7 +60,7 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `ARMED! 医药板块 Score=${context.steps.monitor.outputs.score} (${date})`,
+              title: `ARMED! 医药板块 Score=${{ steps.monitor.outputs.score }} (${date})`,
               body: '```\n' + output + '\n```\n\n历史上 Armed 信号13周期望收益 +8.4%',
               labels: ['armed', 'alert']
             });
