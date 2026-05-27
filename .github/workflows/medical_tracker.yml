@@ -12,68 +12,57 @@ permissions:
 jobs:
   daily-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Debug checkout
-        run: |
-          echo "Commit: $(git log --oneline -1)"
-          echo "=== turning_points.py L1-20 ==="
-          head -20 src/models/turning_points.py
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Clear stale cache
-        run: find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; find . -name "*.pyc" -delete 2>/dev/null; echo "Cache cleared"
-
-      - name: Final verify file
-        run: |
-          echo "=== Commit ===" && git log --oneline -1
-          echo "=== L16-18 ===" && sed -n '14,20p' src/models/turning_points.py
-          echo "=== Grep matplotlib ===" && grep -n "matplotlib" src/models/turning_points.py || echo "NOT FOUND"
-
       - name: Install
         run: pip install pandas numpy scipy akshare openpyxl
+
+      - name: Verify code
+        run: |
+          python -c "from src.models.turning_points import TurningPointDetector; print('Import OK')"
+          python -c "from app.tracker import _compute, _load_data; print('Tracker OK')"
 
       - name: Run monitor
         id: monitor
         env:
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
         run: |
-          python app/notify.py 2>&1 | tee output.txt || true
+          timeout 900 python app/notify.py 2>&1 | tee output.txt || true
           python app/ci_parse.py
 
-      - name: Load parsed values
+      - name: Load results
         id: parsed
-        run: |
-          cat alert_result.txt >> $GITHUB_OUTPUT
+        run: cat alert_result.txt >> $GITHUB_OUTPUT
 
       - name: Generate dashboard
-        run: python app/dashboard.py || true
+        timeout-minutes: 5
+        run: timeout 300 python app/dashboard.py || true
 
-      - name: Commit changes
+      - name: Commit
+        timeout-minutes: 2
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
           git add dashboard.html data/processed/signal_history.csv 2>/dev/null || true
-          git diff --staged --quiet && echo "No changes" || (git commit -m "[auto] $(date +%Y-%m-%d) alert:${{ steps.parsed.outputs.alert }}" && git push || true)
+          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) ${{ steps.parsed.outputs.alert }}" && git push || true)
 
-      - name: Create Issue (RED only)
+      - name: Issue (RED)
         if: steps.parsed.outputs.alert == 'red'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const output = fs.existsSync('output.txt') ? fs.readFileSync('output.txt', 'utf8').slice(0, 4000) : '';
-            const date = new Date().toISOString().split('T')[0];
+            const out = fs.existsSync('output.txt') ? fs.readFileSync('output.txt','utf8').slice(0,4000) : '';
             await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `ARMED! 医药板块 Score=${{ steps.parsed.outputs.score }} (${date})`,
-              body: '```\n' + output + '\n```\n\n历史 Armed 信号 13周期望收益 +8.4%',
-              labels: ['armed', 'alert']
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `ARMED! Score=${{ steps.parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
+              body: '```\n' + out + '\n```\n\n历史Armed信号13周期望+8.4%',
+              labels: ['armed','alert']
             });
