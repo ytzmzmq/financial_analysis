@@ -68,6 +68,13 @@ def _compute(data: dict) -> dict:
             pass
     alert = alert_level(df, prev_score)
 
+    # 保存今天的 Score 到历史记录，供明天判断状态翻转
+    if not hist_path.parent.exists():
+        hist_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"date": latest.name.date(), "score": int(latest["score"])}]).to_csv(
+        hist_path, index=False, mode='a', header=not hist_path.exists()
+    )
+
     return {
         "date": latest.name.date(),
         "price": latest["price"],

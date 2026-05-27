@@ -12,7 +12,6 @@
 import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
-from scipy.stats import percentileofscore
 
 
 # ═══════════════════════════════════════════
@@ -132,11 +131,9 @@ class TurningPointDetector:
         df['rule_dd'] = (df['drawdown_13w'] < -10).astype(int)
 
         if pe_data is not None and len(pe_data.dropna()) > 100:
-            df['val_pct_5y'] = pe_data.rolling(260, min_periods=52).apply(
-                lambda x: percentileofscore(x, x.iloc[-1], kind='rank'), raw=False)
+            df['val_pct_5y'] = pe_data.rolling(260, min_periods=52).rank(pct=True) * 100
         else:
-            df['val_pct_5y'] = med_w.rolling(260, min_periods=52).apply(
-                lambda x: percentileofscore(x, x.iloc[-1], kind='rank'), raw=False)
+            df['val_pct_5y'] = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
         df['rule_cheap'] = (df['val_pct_5y'] < 15).astype(int)
 
         df['skew_13w'] = med_w.pct_change().rolling(13).skew()
@@ -489,94 +486,59 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
 # ═══════════════════════════════════════════
 
 def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
-    """
-    计算每条规则触发所需的精确价格水平。
-
-    返回每个规则的:
-      - triggered: 是否已触发
-      - trigger_price: 触发所需的价格 (NaN = 无法反推/已触发)
-      - pct_away: 距离触发还需跌多少 (%)
-    """
+    """计算当前价格距离 Rule D (回撤) 和 Rule C (估值) 触发的绝对价位差距"""
     latest = df.iloc[-1]
-    current_price = latest["price"]
-    results = {}
+    curr_price = latest['price']
 
-    # Rule D: 深度回撤 <-10%
-    # 回撤 = price / 13w_high - 1, 触发条件: price / 13w_high < 0.90
-    hh_13w = med_w.rolling(13).max().iloc[-1]
-    dd_trigger = hh_13w * 0.90
-    dd_pct = (dd_trigger / current_price - 1) * 100 if not bool(latest["rule_dd"]) else 0
-    results["D"] = {
-        "name": "深度回撤 (<-10%)",
-        "triggered": bool(latest["rule_dd"]),
-        "trigger_price": round(dd_trigger, 2),
-        "current": round(float(current_price), 2),
-        "pct_away": round(dd_pct, 1),
+    # Rule D (13周回撤 < -10%): 跌破过去13周最高点的 90% 即触发
+    max_13w = med_w.rolling(13).max().iloc[-1]
+    trigger_d = max_13w * 0.90
+    triggered_d = bool(latest['rule_dd'])
+    pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
+
+    # Rule C (5年分位 < 15%): 过去 260 周价格序列的 15% 分位数
+    window_260 = med_w.tail(260)
+    trigger_c = window_260.quantile(0.15) if len(window_260) >= 52 else np.nan
+    triggered_c = bool(latest['rule_cheap'])
+    pct_away_c = (trigger_c / curr_price - 1) * 100 if not triggered_c and not np.isnan(trigger_c) else 0.0
+
+    return {
+        "D": {
+            "name": "深度回撤(Rule D)", "triggered": triggered_d,
+            "current": curr_price, "trigger_price": trigger_d, "pct_away": pct_away_d,
+        },
+        "C": {
+            "name": "极度便宜(Rule C)", "triggered": triggered_c,
+            "current": curr_price, "trigger_price": trigger_c, "pct_away": pct_away_c,
+        },
     }
-
-    # Rule C: 极度便宜 <15%分位
-    # 需要 5年窗口内的第 15 百分位价格
-    prices_5y = med_w.iloc[-260:] if len(med_w) >= 260 else med_w
-    cheap_trigger = np.percentile(prices_5y.values, 15)
-    cheap_pct = (cheap_trigger / current_price - 1) * 100 if not bool(latest["rule_cheap"]) else 0
-    results["C"] = {
-        "name": "极度便宜 (<15%分位)",
-        "triggered": bool(latest["rule_cheap"]),
-        "trigger_price": round(float(cheap_trigger), 2),
-        "current": round(float(current_price), 2),
-        "pct_away": round(cheap_pct, 1),
-    }
-
-    # Rule R: RSI < 30 (近似)
-    # RSI = 100 - 100/(1 + avg_gain/avg_loss)
-    # 要 RSI=30, 需要 avg_gain/avg_loss = 3/7 ≈ 0.4286
-    # 近似: 当前 avg_gain/avg_loss 已知, 假设明天 avg_loss 增加 x
-    # avg_gain_new ≈ avg_gain * 13/14 (如果涨) 或 avg_loss_new 会变
-    # 简化: 用当日跌多少能把 avg_gain/avg_loss 推到 0.4286
-    if not bool(latest["rule_rsi"]):
-        rsi_trigger = round(float(current_price * 0.92), 2)  # 近似: 单日跌~8%才能把RSI推到30以下
-        rsi_pct = (rsi_trigger / current_price - 1) * 100
-    else:
-        rsi_trigger = None; rsi_pct = 0
-    results["R"] = {
-        "name": "RSI超卖 (<30)",
-        "triggered": bool(latest["rule_rsi"]),
-        "trigger_price": rsi_trigger,
-        "current": round(float(current_price), 2),
-        "pct_away": round(rsi_pct, 1),
-        "note": "近似值 (RSI为递归指标, 无法精确反推)",
-    }
-
-    return results
 
 
 def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
-    """
-    三级警报系统。
-
-    Returns:
-      level: "silent" | "yellow" | "red"
-      message: 推送文本
-    """
+    """根据 Score 变化和距离阈值的远近，判断当天的报警级别"""
     latest = df.iloc[-1]
-    score = int(latest["score"])
-    prev = prev_score if prev_score is not None else score
+    curr_score = int(latest['score'])
+    if prev_score is None:
+        prev_score = curr_score
 
-    # 红色: Score≥2 且之前<2 (状态翻转)
-    if score >= 2:
-        if prev < 2:
-            return {"level": "red",
-                    "message": f"ARMED! Score={score}/5. 历史上类似时刻13周期望收益+8.4%"}
+    dist = distance_to_trigger(df, df['price'])
+
+    # 状态翻转：昨天还没到击球区，今天盘中跌出了机会
+    if curr_score >= 2 and prev_score < 2:
         return {"level": "red",
-                "message": f"Armed持续. Score={score}/5."}
-
-    # 黄色: Score=1 且距离触发<2%
-    if score == 1:
-        dist = distance_to_trigger(df, df["price"])
-        for key in ["D", "C"]:
-            if not dist[key]["triggered"] and dist[key]["pct_away"] > -3:
-                return {"level": "yellow",
-                        "message": f"近触发: {dist[key]['name']} 仅差{abs(dist[key]['pct_away']):.1f}%. 备好资金."}
-
-    # 静默
-    return {"level": "silent", "message": "无警报"}
+                "message": f"状态翻转！Score从 {prev_score} 突升至 {curr_score}/5！极值击球区出现！"}
+    # 持续在底部
+    elif curr_score >= 2:
+        return {"level": "red",
+                "message": f"持续处于 Armed 状态 (Score {curr_score}/5)，按计划分批买入。"}
+    # 常态区，检查是否接近触发
+    else:
+        d_away = abs(dist['D']['pct_away']) if not dist['D']['triggered'] else 999
+        c_away = abs(dist['C']['pct_away']) if not dist['C']['triggered'] else 999
+        min_away = min(d_away, c_away)
+        if min_away <= 2.5:
+            return {"level": "yellow",
+                    "message": f"临界预警！距底部极值线仅差 {min_away:.1f}%，随时可能触发，请备好资金。"}
+        else:
+            return {"level": "green",
+                    "message": "常态区间。未见极值错杀，安心生活。"}
