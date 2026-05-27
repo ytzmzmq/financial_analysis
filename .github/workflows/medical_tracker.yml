@@ -1,0 +1,65 @@
+name: 医药板块每日监控 + 推送
+
+on:
+  schedule:
+    - cron: '45 6 * * 1-5'           # 北京时间 14:45, 周一至周五
+  workflow_dispatch:
+
+jobs:
+  daily-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install
+        run: pip install pandas numpy scipy akshare openpyxl
+
+      - name: Run monitor + push
+        id: monitor
+        env:
+          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+          PUSHDEER_KEY: ${{ secrets.PUSHDEER_KEY }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: |
+          python app/notify.py 2>&1 | tee output.txt
+          ALERT=$(grep -oP '\[(RED|YELLOW|SILENT)\]' output.txt | head -1 | tr -d '[]')
+          echo "alert=${ALERT}" >> $GITHUB_OUTPUT
+          SCORE=$(grep -oP 'Score: \d+' output.txt | head -1 | grep -oP '\d+')
+          echo "score=${SCORE}" >> $GITHUB_OUTPUT
+
+      - name: Generate dashboard
+        run: python app/dashboard.py
+
+      - name: Save results
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add dashboard.html data/processed/signal_history.csv 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "[auto] $(date +%Y-%m-%d) alert:${{ steps.monitor.outputs.alert }} score:${{ steps.monitor.outputs.score }}"
+            git push
+          fi
+
+      - name: Create Issue on RED alert
+        if: steps.monitor.outputs.alert == 'RED'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('output.txt', 'utf8');
+            const date = new Date().toISOString().split('T')[0];
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `ARMED! 医药板块 Score=${context.steps.monitor.outputs.score} (${date})`,
+              body: '```\n' + output + '\n```\n\n历史上 Armed 信号13周期望收益 +8.4%',
+              labels: ['armed', 'alert']
+            });

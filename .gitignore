@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+dashboard.html
+data/processed/
+data/raw/
+.vscode/
+.idea/

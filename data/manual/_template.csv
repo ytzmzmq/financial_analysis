@@ -1,0 +1,4 @@
+date,ticker,value,source
+2025-01-15,medical_policy_event,1,https://example.com/policy_doc
+2025-02-01,medical_drug_approval,3,CDE审批公告
+2025-03-10,medical_policy_event,-1,https://example.com/jicai_news
