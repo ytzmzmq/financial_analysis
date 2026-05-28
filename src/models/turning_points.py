@@ -4,7 +4,7 @@
 核心变更 (V4→V4.1):
   1. 标签: 阈值式 → Triple Barrier (路径依赖, 无look-ahead)
   2. 评估: Precision/Recall → 条件期望 E[ret|Armed] vs E[ret]
-  3. 信号去重: 保留cluster内最高score, 非第一条
+  3. 信号去重: 保留cluster内第一条（最早可操作信号）
   4. 规则相关性: Pearson → conditional probability P(A|B)
   5. Benchmark对照: unconditional forward return
   6. Label clustering: 连续好买点合并, 避免Recall失真
@@ -105,8 +105,8 @@ def collapse_labels(labels: pd.DataFrame, max_gap_weeks: int = 4) -> pd.DataFram
                 clusters.append(current)
                 current = [d]
         clusters.append(current)
-        for cluster in clusters[1:]:  # 保留第一个, 其余标记为0
-            for d in cluster:
+        for cluster in clusters:
+            for d in cluster[1:]:  # 同一 cluster 内保留第一条, 其余清零
                 result.loc[d, 'label_collapsed'] = 0
 
     return result
@@ -470,8 +470,7 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
     df = pd.DataFrame(index=med_w.index)
     df['rule_rsi'] = (TurningPointDetector._rsi_wilder(med_w, 14) < rsi_thresh).astype(int)
     df['rule_dd'] = ((med_w / med_w.rolling(13).max() - 1) * 100 < dd_thresh).astype(int)
-    p5 = med_w.rolling(260, min_periods=52).apply(
-        lambda x: percentileofscore(x, x.iloc[-1], kind='rank'), raw=False)
+    p5 = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
     df['rule_cheap'] = (p5 < 15).astype(int)
     skew = med_w.pct_change().rolling(13).skew()
     vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
@@ -540,5 +539,5 @@ def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
             return {"level": "yellow",
                     "message": f"临界预警！距底部极值线仅差 {min_away:.1f}%，随时可能触发，请备好资金。"}
         else:
-            return {"level": "green",
+            return {"level": "silent",
                     "message": "常态区间。未见极值错杀，安心生活。"}

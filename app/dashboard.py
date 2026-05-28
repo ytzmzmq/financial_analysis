@@ -61,7 +61,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
     elif score == 3:
         pct, label, color = 50, "半仓 50% — 强信号", "#F97316"
     else:
-        pct, label, color = 70, f"重仓 {pct}% — 极强信号", "#EF4444"
+        pct, label, color = 70, "重仓 70% — 极强信号", "#EF4444"
 
     # ── Distance-to-Trigger ──
     from src.models.turning_points import distance_to_trigger
@@ -224,7 +224,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 
 <div class="footer">
   数据源: AKShare | 申万医药生物指数(801150) | 仅供研究参考, 不构成投资建议<br>
-  方法论: Triple Barrier + 五规则探测器 | 定位: 风险收益比监控器 | V4.2
+  方法论: Triple Barrier + 五规则探测器 | 定位: 风险收益比监控器 | V4.3
 </div>
 
 </div>

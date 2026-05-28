@@ -68,12 +68,17 @@ def _compute(data: dict) -> dict:
             pass
     alert = alert_level(df, prev_score)
 
-    # 保存今天的 Score 到历史记录，供明天判断状态翻转
+    # 保存今天的 Score 到历史记录（按日期去重，避免同一天重复追加）
     if not hist_path.parent.exists():
         hist_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([{"date": latest.name.date(), "score": int(latest["score"])}]).to_csv(
-        hist_path, index=False, mode='a', header=not hist_path.exists()
-    )
+    today_str = str(latest.name.date())
+    if hist_path.exists():
+        hist = pd.read_csv(hist_path)
+        hist = hist[hist["date"] != today_str]  # 删除同日旧记录
+    else:
+        hist = pd.DataFrame(columns=["date", "score"])
+    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": int(latest["score"])}])], ignore_index=True)
+    hist.to_csv(hist_path, index=False)
 
     return {
         "date": latest.name.date(),
