@@ -67,7 +67,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
 
-    # ── 走势图数据 ──
+    # ── 走势图数据 (周线 + 近日线末尾) ──
     weekly_data = []
     for i in range(max(0, len(df) - 104), len(df)):
         r = df.iloc[i]
@@ -77,6 +77,20 @@ def build_dashboard(output_path: str = "dashboard.html"):
             "armed": bool(r["armed"]),
             "score": int(r["score"]),
         })
+
+    # 补近日线数据到 latest_date，使图表显示到"今天"
+    daily_recent = med[med.index > df.index[-1]]
+    for d, p in daily_recent.items():
+        weekly_data.append({
+            "time": d.strftime("%Y-%m-%d"),
+            "value": round(float(p), 2),
+            "armed": False,
+            "score": 0,
+        })
+
+    # 数据源日期
+    data_date_str = df.index[-1].strftime("%Y-%m-%d")
+    daily_latest_str = med.index[-1].strftime("%Y-%m-%d") if len(med) > 0 else data_date_str
 
     # ── 规则 HTML ──
     rule_defs = [
@@ -142,7 +156,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 
 <div class="header">
   <h1>医药板块 风险收益比监控器</h1>
-  <p>申万医药生物(801150) | 更新于 {datetime.now().strftime('%Y-%m-%d %H:%M')} | 数据源: AKShare</p>
+  <p>申万医药生物(801150) | 生成时间 {datetime.now().strftime('%Y-%m-%d %H:%M')} | 指标数据至 {data_date_str} | 日线至 {daily_latest_str} | 数据源: AKShare</p>
 </div>
 
 <div class="card">
@@ -160,27 +174,27 @@ def build_dashboard(output_path: str = "dashboard.html"):
   <div class="metrics">
     <div class="metric">
       <div class="val">{latest["price"]:.0f}</div>
-      <div class="lbl">最新收盘价</div>
+      <div class="lbl">收盘价 ({daily_latest_str})</div>
     </div>
     <div class="metric">
       <div class="val" style="color:{'#ef4444' if latest['rsi']<30 else '#1f2937'}">{latest["rsi"]:.1f}</div>
-      <div class="lbl">RSI(14) Wilder | 阈值30</div>
+      <div class="lbl">RSI(14) Wilder ({data_date_str})</div>
     </div>
     <div class="metric">
       <div class="val" style="color:{'#ef4444' if latest['drawdown_13w']<-10 else '#1f2937'}">{latest["drawdown_13w"]:.1f}%</div>
-      <div class="lbl">13周最大回撤 | 阈值-10%</div>
+      <div class="lbl">13周最大回撤 ({data_date_str})</div>
     </div>
     <div class="metric">
       <div class="val" style="color:{'#ef4444' if latest['val_pct_5y']<15 else '#1f2937'}">{latest["val_pct_5y"]:.0f}%</div>
-      <div class="lbl">5年价格分位 | 阈值15%</div>
+      <div class="lbl">5年价格分位 ({data_date_str})</div>
     </div>
     <div class="metric">
       <div class="val">{latest["vol_annual"]:.1f}%</div>
-      <div class="lbl">年化波动率</div>
+      <div class="lbl">年化波动率 ({data_date_str})</div>
     </div>
     <div class="metric">
-      <div class="val">{'Y' if latest['right_confirm'] else '-'}</div>
-      <div class="lbl">右侧确认 (MACD/MA2)</div>
+      <div class="val" style="color:{'#10b981' if latest['right_confirm'] else '#9ca3af'}">{'已触发' if latest['right_confirm'] else '未触发'}</div>
+      <div class="lbl">右侧确认 MACD/MA2 ({data_date_str})</div>
     </div>
   </div>
 </div>
@@ -196,7 +210,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 </div>
 
 <div class="card">
-  <div class="card-title">走势图 (近2年周线 | 黄箭头=Armed | 虚线=触发水位线)</div>
+  <div class="card-title">走势图 (近2年周线+近日线 | 黄箭头=Armed | 虚线=触发水位线 | 数据至 {daily_latest_str})</div>
   <div id="chart"></div>
 </div>
 
