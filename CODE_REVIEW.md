@@ -1,6 +1,6 @@
 # 医药板块风险收益比监控器 - 完整代码包
 
-18 files | V4.4
+12 files | V4.5
 
 ## 方法论报告
 `REPORT.md`
@@ -1414,7 +1414,7 @@ def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
 ```
 ---
 
-## 数据:AKShare
+## 数据:AKShare(Sina ETF实时)
 `src/data_fetcher/akshare_source.py`
 ```python
 """A股数据源：行情、板块指数、资金流向 —— 通过 AKShare"""
@@ -1426,32 +1426,23 @@ try:
 except ImportError:
     ak = None
 
-def _realtime_fetch():
-    """抓取 000933 实时涨跌幅，绕过系统代理（EastMoney 被代理阻断）"""
-    import requests as _req
-    import os
-    # 清除环境变量 + monkey-patch requests.Session.send 禁用代理
-    saved_env = {k: os.environ.pop(k, None) for k in
-                 ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
-    os.environ["NO_PROXY"] = "*"
-    orig_send = _req.Session.send
-    def _no_proxy(self, req, **kw):
-        kw["proxies"] = {"http": None, "https": None}
-        kw.setdefault("timeout", 15)
-        return orig_send(self, req, **kw)
-    _req.Session.send = _no_proxy
+def fetch_realtime_price() -> float | None:
+    """通过 Sina 抓取 512170(医疗ETF) 实时价, 映射到 801150"""
+    import urllib.request
     try:
-        resp = _req.get(
-            "https://push2.eastmoney.com/api/qt/ulist.np/get",
-            params={"fltt": "2", "fields": "f2,f3", "secids": "1.000933"},
-            timeout=10)
-        data = resp.json()
-        return data.get("data", {}).get("diff", [{}])[0]
-    finally:
-        _req.Session.send = orig_send
-        for k, v in saved_env.items():
-            if v is not None: os.environ[k] = v
-        os.environ.pop("NO_PROXY", None)
+        req = urllib.request.Request(
+            "http://hq.sinajs.cn/list=sh512170",
+            headers={"Referer": "https://finance.sina.com.cn"})
+        resp = urllib.request.urlopen(req, timeout=5).read().decode("gbk", errors="ignore")
+        parts = resp.split('"')[1].split(",")
+        current = float(parts[3])   # 当前价
+        prev_close = float(parts[2])  # 昨收
+        if prev_close > 0:
+            pct = (current / prev_close - 1)
+            return pct  # 返回涨跌幅, 由调用方乘以801150昨收
+    except Exception:
+        pass
+    return None
 
 
 class AKShareSource:
@@ -1475,21 +1466,18 @@ class AKShareSource:
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-        # 用中证医疗(000933)盘中实时涨跌幅映射申万医药(801150)
+        # ETF 实时映射: Sina 抓 512170 涨跌幅 → 映射到 801150
         try:
             today = pd.Timestamp.today().normalize()
             if today.weekday() < 5 and df.iloc[-1]["date"] < today:
-                item = _realtime_fetch()
-                pct_change = item.get("f3", 0) / 100.0
-                if abs(pct_change) < 0.001:
-                    raise Exception("无有效涨跌")
-                last_close = df.iloc[-1]["close"]
-                realtime_price = last_close * (1 + pct_change)
-                new_row = {"date": today, "close": realtime_price, "open": realtime_price,
-                           "high": realtime_price, "low": realtime_price,
-                           "volume": 0, "amount": 0}
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                print(f"[AKShare] 实时: 000933涨跌{pct_change*100:+.2f}% → 801150估算 {realtime_price:.2f}")
+                pct = fetch_realtime_price()
+                if pct is not None:
+                    rt = df.iloc[-1]["close"] * (1 + pct)
+                    df = pd.concat([df, pd.DataFrame([{
+                        "date": today, "close": rt, "open": rt,
+                        "high": rt, "low": rt, "volume": 0, "amount": 0
+                    }])], ignore_index=True)
+                    print(f"[AKShare] ETF实时: 512170涨跌{pct*100:+.2f}% → 801150={rt:.2f}")
         except Exception:
             pass
 
@@ -1929,322 +1917,6 @@ class FREDSource:
 ```
 ---
 
-## 数据:YFinance
-`src/data_fetcher/yfinance_source.py`
-```python
-"""国际数据源：黄金、美元、VIX —— 通过 yfinance"""
-import pandas as pd
-import numpy as np
-from pathlib import Path
-DATA_RAW = Path(__file__).resolve().parent.parent.parent / "data" / "raw"
-
-try:
-    import yfinance as yf
-except ImportError:
-    yf = None
-
-
-class YFinanceSource:
-    """封装 yfinance 数据获取，统一返回 (date, ticker, value) 或 (date, ticker, ohlcv)"""
-
-    # 常用 ticker 映射
-    TICKER_MAP = {
-        "GLD": "GLD",               # SPDR Gold Trust ETF
-        "GC=F": "GC=F",             # 黄金期货
-        "DXY": "DX-Y.NYB",          # 美元指数
-        "VIX": "^VIX",             # CBOE 波动率
-        "SPY": "SPY",              # 标普500 ETF
-        "TLT": "TLT",              # 20Y+ 美债ETF（利率敏感）
-        "USO": "USO",              # WTI 原油ETF（通胀传导）
-    }
-
-    def __init__(self):
-        self.cache_dir = DATA_RAW / "yfinance"
-
-    def fetch_ohlcv(self, raw_ticker: str, name: str,
-                    start_date: str = "2018-01-01",
-                    end_date: str | None = None) -> pd.DataFrame:
-        """获取单个标的 OHLCV 日线数据"""
-        if yf is None:
-            raise ImportError("yfinance not installed")
-        yf_ticker = self.TICKER_MAP.get(raw_ticker, raw_ticker)
-        if end_date is None:
-            end_date = pd.Timestamp.now().strftime("%Y-%m-%d")
-        data = yf.download(yf_ticker, start=start_date, end=end_date,
-                           progress=False, auto_adjust=True)
-        if data.empty:
-            return pd.DataFrame(columns=["date", "ticker", "close", "open", "high", "low", "volume"])
-
-        # yfinance 返回 MultiIndex 列
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.droplevel(1)
-
-        data = data.reset_index()
-        data["ticker"] = name
-        data.columns = [c.lower() for c in data.columns]
-        if "adj close" in data.columns:
-            data = data.drop(columns=["adj close"])
-        rename_map = {k: k for k in data.columns}
-        data = data.rename(columns=rename_map)
-        return data.rename(columns={"date": "date"}).reset_index(drop=True)
-
-    def fetch_all_gold(self, start_date: str = "2018-01-01",
-                       end_date: str | None = None) -> dict[str, pd.DataFrame]:
-        """获取黄金相关所有数据"""
-        tickers = {
-            "GLD": "gold_etf",
-            "GC=F": "gold_futures",
-            "DXY": "dxy",
-            "VIX": "vix",
-        }
-        results = {}
-        for raw_ticker, name in tickers.items():
-            try:
-                results[name] = self.fetch_ohlcv(raw_ticker, name, start_date, end_date)
-            except Exception as e:
-                print(f"[YFinance] Failed to fetch {name}: {e}")
-                results[name] = pd.DataFrame()
-        return results
-
-    def fetch_all(self, start_date: str = "2018-01-01",
-                  end_date: str | None = None) -> dict[str, pd.DataFrame]:
-        """批量拉取所有 yfinance 数据"""
-        if end_date is None:
-            end_date = pd.Timestamp.now().strftime("%Y-%m-%d")
-
-        all_tickers = {
-            "GLD": "gold_etf",
-            "GC=F": "gold_futures",
-            "DXY": "dxy",
-            "VIX": "vix",
-            "SPY": "sp500",
-            "TLT": "us_20y_bond",
-            "USO": "wti_oil",
-        }
-        results = {}
-        for raw_ticker, name in all_tickers.items():
-            try:
-                results[name] = self.fetch_ohlcv(raw_ticker, name, start_date, end_date)
-            except Exception as e:
-                print(f"[YFinance] Failed to fetch {name}: {e}")
-                results[name] = pd.DataFrame()
-        return results
-
-```
----
-
-## 工具:手动导入
-`src/data_fetcher/manual_input.py`
-```python
-"""手动数据导入 —— CSV/Excel 模板解析"""
-import pandas as pd
-import numpy as np
-from pathlib import Path
-DATA_MANUAL = Path(__file__).resolve().parent.parent.parent / "data" / "manual"
-
-
-class ManualInput:
-    """手动数据导入器，支持标准模板 CSV/Excel"""
-
-    TEMPLATE_COLS = ["date", "ticker", "value", "source"]
-
-    def __init__(self, data_dir: Path | None = None):
-        self.data_dir = data_dir or DATA_MANUAL
-
-    def read_file(self, filepath: str | Path) -> pd.DataFrame:
-        """读取单个手动数据文件，自动检测 CSV/Excel"""
-        filepath = Path(filepath)
-        if filepath.suffix in (".csv",):
-            df = pd.read_csv(filepath)
-        elif filepath.suffix in (".xlsx", ".xls"):
-            df = pd.read_excel(filepath)
-        else:
-            raise ValueError(f"Unsupported format: {filepath.suffix}")
-
-        df["date"] = pd.to_datetime(df["date"]).dt.normalize()
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        if "source" not in df.columns:
-            df["source"] = str(filepath.name)
-        return df[["date", "ticker", "value", "source"]].dropna(subset=["date", "value"])
-
-    def read_all(self) -> pd.DataFrame:
-        """读取 data/manual/ 下所有文件并合并"""
-        dfs = []
-        for f in self.data_dir.glob("*"):
-            if f.suffix in (".csv", ".xlsx", ".xls"):
-                try:
-                    df = self.read_file(f)
-                    dfs.append(df)
-                    print(f"[ManualInput] Loaded {f.name}: {len(df)} rows")
-                except Exception as e:
-                    print(f"[ManualInput] Skipped {f.name}: {e}")
-        if not dfs:
-            return pd.DataFrame(columns=self.TEMPLATE_COLS)
-        return pd.concat(dfs, ignore_index=True).sort_values("date")
-
-    @staticmethod
-    def create_template(output_path: str | Path = "data/manual/_template.csv"):
-        """创建标准模板 CSV"""
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        template = pd.DataFrame(columns=["date", "ticker", "value", "source"])
-        template.loc[0] = ["2025-01-15", "medical_policy_event", 1, "https://example.com/policy1"]
-        template.loc[1] = ["2025-02-01", "medical_drug_approval", 3, "CDE官网"]
-        template.loc[2] = ["2025-01-10", "gold_search_index", 85.5, "百度指数"]
-        template.to_csv(output_path, index=False)
-        print(f"Template created at {output_path}")
-        return template
-
-    def merge_to_data(self, data_dict: dict) -> dict:
-        """将手动数据合并到 data dict 中"""
-        manual_df = self.read_all()
-        if manual_df.empty:
-            return data_dict
-
-        # 按 ticker 分组，每个 ticker 作为一个独立数据源
-        for ticker in manual_df["ticker"].unique():
-            sub = manual_df[manual_df["ticker"] == ticker]
-            # 兼容已有的数据格式
-            if ticker in data_dict and not data_dict[ticker].empty:
-                existing = data_dict[ticker]
-                if "value" in existing.columns:
-                    combined = pd.concat([existing, sub[["date", "ticker", "value"]]])
-                    data_dict[ticker] = combined.drop_duplicates(subset=["date"]).sort_values("date")
-                else:
-                    data_dict[ticker] = sub[["date", "ticker", "value"]]
-            else:
-                data_dict[f"manual_{ticker}"] = sub[["date", "ticker", "value"]]
-
-        return data_dict
-
-```
----
-
-## 工具:OCR
-`src/data_fetcher/ocr_capture.py`
-```python
-"""OCR 数据提取 —— 通过 clipboard-vision MCP 从截图提取结构化数据"""
-import pandas as pd
-import subprocess
-import json
-import tempfile
-from pathlib import Path
-
-
-class OCRCapture:
-    """从截图/剪贴板中提取数据表，需 clipboard-vision MCP 支持"""
-
-    def __init__(self):
-        pass
-
-    def from_clipboard(self) -> str:
-        """从剪贴板截图提取文本（需要 MCP 工具）"""
-        # 此函数通过 MCP 调用 clipboard-vision 的 extract_text_from_clipboard
-        # 在实际使用中，由 Claude Code 的 MCP 协议处理
-        print("调用 clipboard-vision MCP: extract_text_from_clipboard")
-        print("请在 Claude Code 中使用 mcp__clipboard-vision__extract_text_from_clipboard 工具")
-        return ""
-
-    def from_screenshot(self, image_path: str) -> str:
-        """从截图文件提取文本"""
-        print(f"调用 clipboard-vision MCP: extract_text from {image_path}")
-        print("请在 Claude Code 中使用 mcp__clipboard-vision__extract_text 工具")
-        return ""
-
-    def parse_table(self, ocr_text: str) -> pd.DataFrame | None:
-        """尝试从 OCR 文本中解析表格数据。
-
-        支持格式：
-        - 逗号/制表符分隔的表格
-        - Markdown 表格
-        - 空格对齐的表格
-        """
-        if not ocr_text.strip():
-            return None
-
-        lines = [l.strip() for l in ocr_text.strip().split("\n") if l.strip()]
-
-        # Markdown 表格
-        if any("|" in l for l in lines):
-            return self._parse_markdown_table(lines)
-
-        # 制表符分隔
-        if "\t" in lines[0]:
-            rows = [l.split("\t") for l in lines]
-        # 逗号分隔
-        elif "," in lines[0] and lines[0].count(",") >= 2:
-            rows = [l.split(",") for l in lines]
-        else:
-            # 尝试空格分隔
-            rows = [l.split() for l in lines]
-
-        if not rows or len(rows) < 2:
-            return None
-
-        # 第一行作为列名
-        cols = [c.strip() for c in rows[0]]
-        data = [[v.strip() for v in row] for row in rows[1:]]
-
-        df = pd.DataFrame(data, columns=cols)
-
-        # 自动检测日期列
-        for c in df.columns:
-            if any(kw in c.lower() for kw in ["date", "日期", "时间"]):
-                try:
-                    df[c] = pd.to_datetime(df[c])
-                except Exception:
-                    pass
-
-        return df
-
-    @staticmethod
-    def _parse_markdown_table(lines: list[str]) -> pd.DataFrame:
-        """解析 Markdown 表格"""
-        # 过滤分隔符行（| --- | --- |）
-        data_lines = [l for l in lines if "---" not in l and l.count("|") >= 2]
-        if not data_lines:
-            return pd.DataFrame()
-
-        header = [c.strip() for c in data_lines[0].split("|") if c.strip()]
-        rows = []
-        for line in data_lines[1:]:
-            cells = [c.strip() for c in line.split("|") if c.strip()]
-            if cells:
-                rows.append(cells)
-
-        return pd.DataFrame(rows, columns=header[:len(rows[0])] if rows else header)
-
-    def to_manual_format(self, df: pd.DataFrame, source: str = "ocr") -> pd.DataFrame:
-        """将解析出的表格转为标准手动数据格式 (date, ticker, value)"""
-        result = pd.DataFrame()
-        result["date"] = pd.to_datetime(df.iloc[:, 0])
-        result["ticker"] = "ocr_data"
-        result["value"] = pd.to_numeric(df.iloc[:, 1], errors="coerce")
-        result["source"] = source
-        return result.dropna(subset=["date", "value"])
-
-```
----
-
-## init
-`src/data_fetcher/__init__.py`
-```python
-from .akshare_source import AKShareSource
-from .yfinance_source import YFinanceSource
-from .fred_source import FREDSource
-from .manual_input import ManualInput
-from .ocr_capture import OCRCapture
-
-```
----
-
-## init
-`src/models/__init__.py`
-```python
-
-```
----
-
 ## 应用:CLI跟踪器
 `app/tracker.py`
 ```python
@@ -2453,18 +2125,30 @@ if __name__ == "__main__":
 ```
 ---
 
-## 应用:HTML看板
+## 应用:HTML看板(内联图表)
 `app/dashboard.py`
 ```python
-"""生成自包含 HTML 看板 — 浏览器直接打开"""
-import sys
-import json
+"""生成自包含 HTML 看板 — 图表库首次下载缓存，之后离线可用"""
+import sys, json, urllib.request, time
 from pathlib import Path
 from datetime import datetime
-import pandas as pd
-import numpy as np
+import pandas as pd, numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+LW_CACHE = Path("data/lightweight-charts.min.js")
+LW_CDN = "https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"
+
+def _get_lw_js() -> str:
+    """优先读本地缓存，没有则下载一次并缓存"""
+    if LW_CACHE.exists() and LW_CACHE.stat().st_size > 100_000:
+        return LW_CACHE.read_text(encoding="utf-8")
+    print("下载图表库 (仅首次)...")
+    js = urllib.request.urlopen(LW_CDN, timeout=20).read().decode("utf-8")
+    LW_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    LW_CACHE.write_text(js, encoding="utf-8")
+    print(f"已缓存 {LW_CACHE} (后续离线)")
+    return js
 
 CSS = """*{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937;padding:20px}
@@ -2488,7 +2172,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .rec-table th,.rec-table td{text-align:center;padding:6px 8px;border-bottom:1px solid #f3f4f6}
 .rec-table th{color:#6b7280;font-weight:600}
 .first-signal{font-weight:600}
-#chart{width:100%;height:350px}
+#chart{width:100%;max-width:100%;height:350px;overflow:hidden}
 .footer{text-align:center;color:#9ca3af;font-size:12px;margin-top:20px}
 .position-card{text-align:center;padding:24px}
 .position-card .pct{font-size:48px;font-weight:800}
@@ -2498,10 +2182,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 def build_dashboard(output_path: str = "dashboard.html"):
     from src.data_fetcher.akshare_source import AKShareSource
     from src.models.turning_points import TurningPointDetector, collapse_signals
-    import time
 
     t0 = time.time()
-    print("极速拉取最新数据...")
+    print("生成看板...")
 
     med_df = AKShareSource().fetch_sw_medical("20180101")
     med = med_df.set_index("date")["close"].sort_index()
@@ -2514,10 +2197,10 @@ def build_dashboard(output_path: str = "dashboard.html"):
     score = int(latest["score"])
     if score <= 1:       pct, label, color = 0, "观望 (0%)", "#9CA3AF"
     elif score == 2:
-        if bool(latest["right_confirm"]): pct, label, color = 30, "轻仓 30% — Armed + 右侧确认", "#F59E0B"
-        else:                             pct, label, color = 15, "试探仓 15% — Armed, 等右侧确认", "#F59E0B"
-    elif score == 3:     pct, label, color = 50, "半仓 50% — 强信号", "#F97316"
-    else:                pct, label, color = 70, "重仓 70% — 极强信号", "#EF4444"
+        if bool(latest["right_confirm"]): pct, label, color = 30, "轻仓 30%", "#F59E0B"
+        else:                             pct, label, color = 15, "试探仓 15%", "#F59E0B"
+    elif score == 3:     pct, label, color = 50, "半仓 50%", "#F97316"
+    else:                pct, label, color = 70, "重仓 70%", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
@@ -2531,18 +2214,17 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
     rule_defs = [
-        ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30", "短期动能衰竭"),
-        ("D: 深度回撤", bool(latest["rule_dd"]), f'{latest["drawdown_13w"]:.1f}%', "< -10%", "跌幅充分"),
-        ("C: 极度便宜", bool(latest["rule_cheap"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%", "历史低位区域"),
-        ("P: 恐慌指数", bool(latest["rule_panic"]), f'偏度{latest["skew_13w"]:.2f}', "偏度<-1 或 波动飙升", "极端左尾事件"),
-        ("M: 聪明钱", bool(latest["rule_micro"]), "待数据", "ETF份额逆势增", "机构越跌越买"),
+        ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30"),
+        ("D: 深度回撤", bool(latest["rule_dd"]), f'{latest["drawdown_13w"]:.1f}%', "< -10%"),
+        ("C: 极度便宜", bool(latest["rule_cheap"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
+        ("P: 恐慌指数", bool(latest["rule_panic"]), f'偏度{latest["skew_13w"]:.2f}', "偏度<-1 或 波动飙升"),
+        ("M: 聪明钱", bool(latest["rule_micro"]), "待数据", "ETF份额逆势增"),
     ]
     rules_html = ""
-    for name, ok, val, thresh, desc in rule_defs:
+    for name, ok, val, thresh in rule_defs:
         rules_html += f"""<div class="rule-row">
     <div class="rule-icon {'on' if ok else 'off'}">{'Y' if ok else '-'}</div>
     <div><strong>{name}</strong><br><span style="font-size:11px;color:#6b7280">{val} (阈值: {thresh})</span></div>
-    <div class="rule-desc">{desc}</div>
 </div>"""
 
     collapsed = collapse_signals(df["armed"])
@@ -2556,44 +2238,48 @@ def build_dashboard(output_path: str = "dashboard.html"):
     <td>{r['rsi']:.1f}</td><td>{r['drawdown_13w']:.1f}%</td><td>{'*' if first else ''}</td></tr>"""
 
     waterline_html = ""
-    for key, emoji in [("D", "红"), ("C", "绿")]:
+    for key, emoji in [("D",""),("C","")]:
         dv = dist[key]
         if dv["triggered"]:
-            waterline_html += f'<div style="padding:6px 12px;background:#f0fdf4;border-radius:6px;font-size:13px">{emoji} <b>{dv["name"]}</b>: 已触发</div>'
+            waterline_html += f'<div style="padding:6px 12px;background:#f0fdf4;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 已触发</div>'
         elif dv.get("trigger_price") and not np.isnan(dv["trigger_price"]):
-            waterline_html += f'<div style="padding:6px 12px;background:#fefce8;border-radius:6px;font-size:13px">{emoji} <b>{dv["name"]}</b>: 触发价 <b>{dv["trigger_price"]:.0f}</b> (距当前 {dv["pct_away"]:+.1f}%)</div>'
+            waterline_html += f'<div style="padding:6px 12px;background:#fefce8;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 触发价 <b>{dv["trigger_price"]:.0f}</b> (距当前 {dv["pct_away"]:+.1f}%)</div>'
 
     waterline_prices = {}
     for key in ["D", "C"]:
         if not dist[key]["triggered"] and dist[key].get("trigger_price") and not np.isnan(dist[key]["trigger_price"]):
             waterline_prices[key] = dist[key]["trigger_price"]
 
+    # ── 图表库：内联（首次下载缓存） ──
+    try:
+        lw_js = _get_lw_js()
+        lw_tag = f"<script>{lw_js}</script>"
+    except Exception as e:
+        print(f"图表库加载失败: {e}")
+        lw_tag = f'<script src="{LW_CDN}"></script>'
+
     chart_data = json.dumps(weekly_data, ensure_ascii=False)
     waterline_json = json.dumps(waterline_prices, ensure_ascii=False)
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>医药板块风险收益比监控器</title>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"
-        onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
+{lw_tag}
 <style>{CSS}</style>
 </head>
-<body>
-<div class="container">
+<body><div class="container">
 <div class="header">
   <h1>医药板块 风险收益比监控器</h1>
-  <p>申万医药生物(801150) | 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')} | 指标至 {data_date_str} | 日线至 {data_date_str} | AKShare</p>
+  <p>申万医药生物(801150) | 数据至 {data_date_str} | {"实时 (via 512170 ETF)" if med.index[-1].date() == pd.Timestamp.today().date() else "EOD"} | 耗时 {time.time()-t0:.1f}s</p>
 </div>
 <div class="card"><div class="position-card">
   <div class="pct" style="color:{color}">{pct}%</div>
   <div class="label">{label}</div>
   <div style="margin-top:12px"><span class="signal-badge" style="background:{color}">Score {score}/5</span></div>
 </div></div>
-<div class="card"><div class="card-title">关键指标</div><div class="metrics">
-  <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价 ({data_date_str})</div></div>
+<div class="card"><div class="card-title">关键指标 ({data_date_str})</div><div class="metrics">
+  <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['rsi']<30 else '#1f2937'}">{latest["rsi"]:.1f}</div><div class="lbl">RSI(14) Wilder</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['drawdown_13w']<-10 else '#1f2937'}">{latest["drawdown_13w"]:.1f}%</div><div class="lbl">13周最大回撤</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['val_pct_5y']<15 else '#1f2937'}">{latest["val_pct_5y"]:.0f}%</div><div class="lbl">5年价格分位</div></div>
@@ -2604,51 +2290,56 @@ def build_dashboard(output_path: str = "dashboard.html"):
   <div style="display:flex;gap:8px;flex-wrap:wrap">{waterline_html if waterline_html else '<span style="color:#9ca3af">无法计算</span>'}</div>
 </div>
 <div class="card"><div class="card-title">五规则状态</div>{rules_html}</div>
-<div class="card"><div class="card-title">走势图 (近2年周线+近日线 | 黄箭头=Armed | 虚线=水位线)</div><div id="chart"></div></div>
+<div class="card"><div class="card-title">走势图 (黄箭头=Armed | 虚线=水位线)</div><div id="chart"></div></div>
 <div class="card"><div class="card-title">近期 Armed 信号 (* = 入场)</div>
   <table class="rec-table"><tr><th>日期</th><th>Score</th><th>价格</th><th>RSI</th><th>回撤</th><th>入场</th></tr>{armed_html}</table>
 </div>
-<div class="footer">AKShare | 耗时 {time.time()-t0:.2f}s | 仅供参考, 不构成投资建议</div>
+<div class="footer">AKShare | V4.4 | 仅供参考</div>
 </div>
 <script>
-var d = {chart_data};
-var chart = LightweightCharts.createChart(document.getElementById('chart'), {{
-    layout: {{ background: {{ color: '#ffffff' }}, textColor: '#1f2937' }},
-    grid: {{ vertLines: {{ color: '#f3f4f6' }}, horzLines: {{ color: '#f3f4f6' }} }},
-    rightPriceScale: {{ borderColor: '#d1d5db' }},
-    timeScale: {{ borderColor: '#d1d5db', timeVisible: true }},
-    width: document.getElementById('chart').clientWidth, height: 350,
-}});
-var line = chart.addLineSeries({{ color: '#3B82F6', lineWidth: 2 }});
-var uniqueData = [], seen = new Set();
-d.forEach(function(w) {{
-    if (!seen.has(w.time) && w.value != null && !isNaN(w.value)) {{ seen.add(w.time); uniqueData.push(w); }}
-}});
-uniqueData.sort(function(a,b) {{ return a.time.localeCompare(b.time); }});
-var prices = uniqueData.map(function(w) {{ return {{ time: w.time, value: w.value }}; }});
-var markers = uniqueData.filter(function(w) {{ return w.armed; }}).map(function(w) {{
-    return {{ time: w.time, position: 'belowBar', color: '#F59E0B', shape: 'arrowUp', text: String(w.score) }};
-}});
-line.setData(prices); line.setMarkers(markers);
-var waterlines = {waterline_json};
-var colors = {{ 'D': '#EF4444', 'C': '#10B981' }};
-var labels = {{ 'D': '回撤触发', 'C': '估值触发' }};
-Object.keys(waterlines).forEach(function(key) {{
-    var price = waterlines[key];
-    var wl = chart.addLineSeries({{ color: colors[key], lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }});
-    var data = [];
-    for (var i = 0; i < prices.length; i++) {{ data.push({{ time: prices[i].time, value: price }}); }}
-    wl.setData(data);
-    wl.setMarkers([{{ time: prices[prices.length-1].time, position: 'inLine', color: colors[key], shape: 'circle', text: labels[key] + ' ' + price.toFixed(0) }}]);
-}});
-chart.timeScale().fitContent();
-window.addEventListener('resize', function() {{ chart.applyOptions({{ width: document.getElementById('chart').clientWidth }}); }});
+try {{
+    var d = {chart_data};
+    var el = document.getElementById('chart');
+    var chart = LightweightCharts.createChart(el, {{
+        layout: {{ background: {{ color: '#ffffff' }}, textColor: '#1f2937' }},
+        grid: {{ vertLines: {{ color: '#f3f4f6' }}, horzLines: {{ color: '#f3f4f6' }} }},
+        rightPriceScale: {{ borderColor: '#d1d5db' }},
+        timeScale: {{ borderColor: '#d1d5db', timeVisible: true }},
+        width: Math.min(el.clientWidth || 900, window.innerWidth - 60 || 900), height: 350,
+    }});
+    var line = chart.addLineSeries({{ color: '#3B82F6', lineWidth: 2 }});
+    var uniqueData = [], seen = new Set();
+    d.forEach(function(w) {{
+        if (!seen.has(w.time) && w.value != null && !isNaN(w.value)) {{ seen.add(w.time); uniqueData.push(w); }}
+    }});
+    uniqueData.sort(function(a,b) {{ return a.time.localeCompare(b.time); }});
+    var prices = uniqueData.map(function(w) {{ return {{ time: w.time, value: w.value }}; }});
+    var markers = uniqueData.filter(function(w) {{ return w.armed; }}).map(function(w) {{
+        return {{ time: w.time, position: 'belowBar', color: '#F59E0B', shape: 'arrowUp', text: String(w.score) }};
+    }});
+    line.setData(prices); line.setMarkers(markers);
+    var waterlines = {waterline_json};
+    var colors = {{ 'D': '#EF4444', 'C': '#10B981' }};
+    var labels = {{ 'D': '回撤触发', 'C': '估值触发' }};
+    Object.keys(waterlines).forEach(function(key) {{
+        var price = waterlines[key];
+        var wl = chart.addLineSeries({{ color: colors[key], lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }});
+        var data = [];
+        for (var i = 0; i < prices.length; i++) {{ data.push({{ time: prices[i].time, value: price }}); }}
+        wl.setData(data);
+        wl.setMarkers([{{ time: prices[prices.length-1].time, position: 'inLine', color: colors[key], shape: 'circle', text: labels[key] + ' ' + price.toFixed(0) }}]);
+    }});
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', function() {{ chart.applyOptions({{ width: Math.min(el.clientWidth || 900, window.innerWidth - 60 || 900) }}); }});
+}} catch(e) {{
+    document.getElementById('chart').innerHTML =
+        '<div style="padding:40px;text-align:center;color:#ef4444"><b>图表加载失败</b><br><small>'+e.message+'</small></div>';
+}}
 </script>
-</body>
-</html>"""
+</body></html>"""
 
     Path(output_path).write_text(html, encoding="utf-8")
-    print(f"Dashboard saved ({time.time()-t0:.2f}s)")
+    print(f"Dashboard saved ({time.time()-t0:.1f}s)")
     return output_path
 
 
@@ -2821,31 +2512,6 @@ if __name__ == "__main__":
 ```
 ---
 
-## 应用:CI解析
-`app/ci_parse.py`
-```python
-"""CI 辅助脚本：从 output.txt 解析 alert level 和 score"""
-import sys, re
-
-with open("output.txt", "r", encoding="utf-8", errors="replace") as f:
-    text = f.read()
-
-# 解析 alert: 找 [SILENT] 或 [YELLOW] 或 [RED]
-m = re.search(r'\[(SILENT|YELLOW|RED)\]', text)
-alert = m.group(1).lower() if m else "silent"
-
-# 解析 score
-m = re.search(r'Score:\s*(\d+)', text)
-score = m.group(1) if m else "0"
-
-# 输出给 GitHub Actions
-with open("alert_result.txt", "w") as f:
-    f.write(f"alert={alert}\nscore={score}\n")
-print(f"alert={alert} score={score}")
-
-```
----
-
 ## 应用:实时看板服务器
 `app/server.py`
 ```python
@@ -2884,7 +2550,7 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>医药板块监控器</title>
-<script src="/static/lc.js"></script>
+<script src="/lw.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -2971,7 +2637,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .dist-pct.close{color:var(--yellow)}
 
 /* Chart */
-#chart{width:100%;height:320px}
+#chart{width:100%;max-width:100%;height:320px;overflow:hidden}
 
 /* Table */
 .sig-table{width:100%;border-collapse:collapse;font-size:12px}
@@ -3182,7 +2848,8 @@ function render(d) {
     </div>`;
   }).join('');
 
-  // Chart
+  // Chart (try-catch, 错误可见)
+  try {
   if (chart) { chart.remove(); chart = null; }
   const el = document.getElementById('chart');
   chart = LightweightCharts.createChart(el, {
@@ -3190,7 +2857,7 @@ function render(d) {
     grid: {vertLines:{color:'#1e293b'}, horzLines:{color:'#1e293b'}},
     rightPriceScale: {borderColor:'#2a2d3e'},
     timeScale: {borderColor:'#2a2d3e', timeVisible:true},
-    width: el.clientWidth, height: 320,
+    width: el.clientWidth || window.innerWidth - 80 || 900, height: 320,
   });
 
   const line = chart.addLineSeries({color:'#38bdf8', lineWidth:2});
@@ -3233,8 +2900,12 @@ function render(d) {
   });
   chart.timeScale().fitContent();
   window.addEventListener('resize', () => {
-    chart.applyOptions({width: el.clientWidth});
+    chart.applyOptions({width: el.clientWidth || window.innerWidth - 80 || 900});
   });
+  } catch(e) {
+    document.getElementById('chart').innerHTML =
+      '<div style="padding:40px;text-align:center;color:#ef4444"><b>图表加载失败</b><br><small>'+e.message+'</small></div>';
+  }
 
   // Armed signal table
   document.getElementById('sig-tbody').innerHTML = d.armed_history.slice(-20).reverse().map(s =>
@@ -3345,6 +3016,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/signal"):
             self._serve_api()
+        elif self.path == "/lw.js":
+            self._serve_lw()
         elif self.path.startswith("/static/"):
             self._serve_static()
         else:
@@ -3354,6 +3027,18 @@ class Handler(BaseHTTPRequestHandler):
         body = HTML.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_lw(self):
+        js_path = Path("data/lightweight-charts.min.js")
+        if not js_path.exists():
+            self.send_response(404); self.end_headers(); return
+        body = js_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript")
+        self.send_header("Cache-Control", "max-age=86400")
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
