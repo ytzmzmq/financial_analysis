@@ -533,16 +533,20 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
 # 10. Distance-to-Trigger (反推目标价)
 # ═══════════════════════════════════════════
 
-def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
+def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series, margin_w: pd.Series = None) -> dict:
     """计算当前价格距离 S3 (新低背离) 和 V1 (估值冰点) 触发的价位差距"""
     latest = df.iloc[-1]
     curr_price = latest['price']
 
-    # S3 (融资背离触发底线): 跌破过去12周最低点 = 创13周新低
+    # S3 触发条件: 价格创13周新低 AND 融资4周逆势加仓。两者缺一不可
+    trigger_s3 = np.nan
     if len(med_w) >= 13:
-        trigger_s3 = med_w.iloc[-13:-1].min()
-    else:
-        trigger_s3 = np.nan
+        margin_ok = False
+        if margin_w is not None and len(margin_w) >= 5:
+            margin_chg_4w = margin_w.iloc[-1] / margin_w.iloc[-5] - 1
+            margin_ok = margin_chg_4w > 0
+        if margin_ok:
+            trigger_s3 = med_w.iloc[-13:-1].min()
     triggered_s3 = bool(latest.get('rule_S3', 0))
     pct_away_s3 = (trigger_s3 / curr_price - 1) * 100 if not triggered_s3 and not np.isnan(trigger_s3) else 0.0
 

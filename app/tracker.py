@@ -62,7 +62,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         })
 
     from src.models.turning_points import distance_to_trigger, alert_level
-    dist = distance_to_trigger(df, med_w)
+    dist = distance_to_trigger(df, med_w, margin_w=margin_w)
 
     # 读取历史 + 保存今天 (合并为一次IO，避免竞态)
     hist_path = Path("data/processed/signal_history.csv")

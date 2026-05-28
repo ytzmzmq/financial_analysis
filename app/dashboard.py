@@ -60,8 +60,15 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
 
+    from src.data_fetcher.akshare_source import AKShareSource as _AKS
+    margin_df = _AKS().fetch_margin_data("20180101")
+    margin_w = None
+    if not margin_df.empty:
+        m = margin_df.set_index("date")["value"].sort_index()
+        margin_w = m.resample("W-FRI").last().dropna().shift(1)
+
     det = V5Detector()
-    df = det.compute(med_w, vol_w=None, margin_w=None)
+    df = det.compute(med_w, margin_w=margin_w)
     latest = df.iloc[-1]
 
     score = float(latest["score"])
@@ -71,7 +78,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
     else:                pct, label, color = 60, "重仓 60% — 多因子触发", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
-    dist = distance_to_trigger(df, med_w)
+    dist = distance_to_trigger(df, med_w, margin_w=margin_w)
 
     weekly_data = []
     for i in range(max(0, len(df) - 104), len(df)):

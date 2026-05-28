@@ -1,6 +1,6 @@
 # 医药板块 V5.1 - 完整代码包
 
-12 files | V5.1 | 三因子评分卡(S3融资背离通过检验)
+10 files | V5.1
 
 ## 方法论报告 V5.1
 `REPORT.md`
@@ -108,10 +108,11 @@ V5 的 2 个因子全部经过统计显著性检验。V4 的 R/D/C/P/M 五规则
 ### 当前信号
 
 ```
-Score: 0.0/10（阈值 5.5）
-M1 偏度异常: 0.24（阈值 < -1.5）— 未触发
-V1 估值冰点: 22%（阈值 < 15%）— 未触发
-→ HOLD
+Score: 3.0/10（阈值 3.5）
+M1 偏度异常(4.5分): 未触发（偏度 0.24, 需 < -1.5）
+S3 融资背离(3.0分): ★ 已触发（价创13周新低 + 融资逆势加仓）
+V1 估值冰点(2.5分): 未触发（分位 22%, 需 < 15%）
+→ YELLOW 预警（距 Armed 差 0.5 分）
 ```
 
 ---
@@ -181,854 +182,6 @@ financial_analysis/
 │       └── factor_optimizer.py            # 五阶段因子优化框架
 └── .github/workflows/medical_tracker.yml  # CI 每交易日
 ```
-
-```
----
-
-## 项目工作日志
-`PROGRESS.md`
-```markdown
-# 项目工作日志
-
-## 项目概述
-
-为基金投资者构建一个医药板块风险收益比监控系统。从"预测下周涨跌"的 XGBoost 模型开始，经历方法论重构、多轮 Bug 修复和实用化改造，最终定型为基于五规则的极端超跌状态检测器，支持每日自动运行、微信推送和可视化看板。
-
----
-
-## 第一章：方案设计与初始搭建
-
-### 需求讨论
-
-用户需求：通过因子分析预测股市板块/金价，辅助基金投资决策。
-
-经过讨论确定：
-- 预测标的：申万医药生物指数（801150），与黄金驱动逻辑互补
-- 预测周期：周频为主，日频聚合（周频噪声可控、与宏观因子频率匹配）
-- 输出形式：方向判断 + 幅度预测，含稳健性检验
-- 因子不固化，灵活可扩展
-- 严格时间序列切分训练/测试集
-- 数据源全部免费（AKShare + FRED）
-- 技术栈：Python + Jupyter Notebook
-
-### 创建项目骨架
-
-```bash
-mkdir -p config data/raw data/processed data/manual \
-  src/data_fetcher src/factors src/features src/models src/backtest \
-  src/utils notebooks app
-```
-
-安装依赖（使用清华镜像解决国内 pip 超时）：
-
-```bash
-pip install akshare yfinance pandas-datareader xgboost shap \
-  scikit-learn jupyter plotly openpyxl seaborn \
-  -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-
-### 数据采集模块
-
-**AKShare 数据源** (`src/data_fetcher/akshare_source.py`)：
-- 探索 AKShare 实际可用 API：`index_hist_sw`（申万行业指数）、`stock_zh_index_daily`（大盘指数）、`stock_hsgt_hist_em`（北向资金）、`futures_foreign_hist`（COMEX 黄金期货）、`macro_china_pmi`、`macro_china_cpi`、`macro_china_ppi`、`macro_china_money_supply`（M2）、`macro_china_market_margin_sh/sz`（融资融券）、`stock_board_concept_index_ths`（概念板块）、`currency_boc_sina`（USD/CNY 汇率）、`spot_golden_benchmark_sge`（上海金交所）
-- 函数签名与文档不完全一致，逐一测试确认参数格式
-- 申万医药代码为 `801150`，COMEX 黄金代码为 `GC`
-
-**FRED 数据源** (`src/data_fetcher/fred_source.py`)：
-- 通过 `pandas_datareader` 获取美国宏观数据
-- 序列包括：DGS10（10Y 利率）、DGS2（2Y 利率）、DFII10（TIPS 实际利率）、FEDFUNDS（联邦基金利率）、CPIAUCSL（CPI）、UNRATE（失业率）、T10Y2Y（利差）
-
-**YFinance 数据源** (`src/data_fetcher/yfinance_source.py`)：
-- 用于获取 GLD（黄金 ETF）、GC=F（黄金期货）、DXY（美元指数）、VIX（恐慌指数）
-- 在中国网络环境下被限流（YFRateLimitError），实际不可用
-- 后续通过 AKShare 的 `futures_foreign_hist(symbol="GC")` 替代
-
-**发现**：
-- AKShare API 版本间差异大（`sw_index_daily` 变更为 `index_hist_sw`）
-- `index_analysis_daily_sw` 内部编码 bug（中文字段丢失），改用 `index_hist_sw`
-- `bond_china_yield` 数据仅到 2021 年，太旧不可用
-- `currency_boc_sina` 仅返回最近约 180 行数据
-
-### 因子体系
-
-创建 `Factor` 基类 + 因子注册表模式，共设计约 44 个因子，分四大类：
-- 宏观：美债利率/利差、实际利率、美元指数、VIX、联邦基金利率、CPI、失业率、中国 CPI/PPI/PMI/M2、中美利差
-- 市场：多周期动量、成交额、北向资金、超额收益、行业轮动强度
-- 技术：RSI、MACD、布林带、波动率、量比、均线排列、价格位置
-- 情绪：GLD 持仓变化、PE/PB 分位、政策事件（占位）、搜索指数（占位）
-
-因子注册表（`config/factor_registry.py`）声明式注册，增删条目即可切换因子组合。
-
-### 特征工程
-
-`src/features/engineer.py`：滞后（1/2/4 周）、滚动统计（4/13 周均值/标准差）、一阶差分。
-
----
-
-## 第二章：XGBoost 模型尝试（已废弃）
-
-### V1：36 因子预测下周涨跌
-
-**操作流程**：
-1. 从 AKShare + FRED 拉取 2020-01 至今的全部数据
-2. 用 `FactorPipeline` 批量计算 36 个因子
-3. 用 `align_factors_with_target` 对齐因子与下周收益率
-4. 因子筛选：`FactorScreener` 按 IC/IC_IR/VIF 筛选
-5. 时间序列切分：前 80% 训练，后 20% 测试
-6. 特征工程：对每个因子做滞后+滚动+差分
-7. StandardScaler 标准化
-8. 训练 XGBoost Classifier（方向）和 Regressor（幅度）
-9. TimeSeriesSplit 5 折交叉验证
-
-**初始结果**：声称准确率 56.98%、Hit Ratio 59.30%
-
-**严格统计检验暴露问题**：
-- Binomial Test：P-value = 0.87，无法拒绝"模型无效"假设
-- Permutation Test（200 次打乱标签重新训练）：真实模型在 69 分位，31% 的假模型表现更好
-- 结论：模型没有可证明的预测能力
-
-**排查发现三处致命数据泄露**：
-1. 因子筛选在全部 428 周数据上做 IC 分析，测试集参与了因子选择
-2. 月频数据（CPI/PPI/M2）前向填充，月末标注的 PPI 实际要到次月中旬才公布
-3. 特征工程递归叠加（add_lags → add_rolling → add_diff 依次对所有列操作），5 个原始因子最终产生 200 个特征，样本/特征 = 1.7:1
-
-**修复所有泄露后**：准确率降至 46.51%，跑输"永远做多"基准（52.33%）。
-
-### V2：XGBoost 预测拐点
-
-**操作流程**：
-1. 用 `scipy.signal.argrelextrema(order=8)` 标注历史底部（T 是 T±8 区间最低点）
-2. 用 TurningPointFeatures 构建拐点专属特征（ERP 分位、成交量占比、底背离、美债二阶导、融资背离）
-3. 用 `scale_pos_weight` 处理样本不平衡（正负比 1:23）
-4. 训练 XGBoost Classifier
-
-**结果**：模型完全不发信号——学会了"永远说没底"来最小化误差。正样本仅 14 个，模型根本无法学习。
-
-### 关键教训
-
-- 用 Accuracy 评估极度不平衡事件毫无意义（永远输出 0 就有 96% 准确率）
-- 预测"每一周涨跌"本质是在预测噪声
-- 数据泄露的三个主要来源：特征筛选在全集上做、月频数据未做发布时滞、特征工程叠加爆炸
-- 极稀疏事件（4.2%）不适合梯度提升树，需要完全不同的方法论
-
----
-
-## 第三章：规则探测器 V3
-
-### 方法论转变
-
-不再预测每一周，改为识别极端超跌状态。用五条经济含义明确的简单规则，多数表决产生信号。
-
-### 五规则设计
-
-```
-Score = Rule_R + Rule_D + Rule_C + Rule_P + Rule_M
-Signal = (Score ≥ 2)
-```
-
-| 规则 | 条件 | 阈值来源 |
-|:----:|------|----------|
-| R（RSI 超卖） | RSI(14) < 30 | 底部 RSI 均值 35.2 vs 正常 51.2，p=0.0002 |
-| D（深度回撤） | 13 周最大回撤 < -10% | 底部回撤均值 -14.4% vs 正常 -5.9%，p<0.0001 |
-| C（极度便宜） | 5 年价格分位 < 15% | 底部均值 36.3 vs 正常 52.3，p=0.059 |
-| P（恐慌指数） | 偏度 < -1 或波动率 > 2.5 年 80 分位 | 捕捉极端左尾事件 |
-| M（聪明钱） | ETF 份额逆势增长 | 价跌+份额增 |
-
-### 拐点标注
-
-```python
-from scipy.signal import argrelextrema
-mins = argrelextrema(values, np.less, order=8)[0]
-# T 时刻是 [T-8, T+8] 区间内的最低点 → label=1
-```
-
-标注结果：18 个底部、15 个顶部（2018-2026），底部占全部观测的 4.2%。
-
-### 评估结果（测试期 2024-10 ~ 2026-05）
-
-四个测试期底部：
-- 2025-01-10：急跌底，D+C 规则触发 → 命中
-- 2025-04-18：慢跌底，C+P 规则触发 → 命中
-- 2026-01-02：温和调整底，指标均未达极端 → 漏检
-- 2026-03-20：温和调整底，DD 逼近但未突破 -10% → 漏检
-
-### V3 结论
-
-Precision（信号级）= 47%，底部级 Recall = 50%。MFE/MAE：Armed 信号后 13 周期望收益 +5.0%，胜率 60%。
-
----
-
-## 第四章：V3 Bug 修复（多轮）
-
-### 第一轮：tracker 硬编码、灵敏度不对齐
-
-**问题 1**：`app/tracker.py` 中 Rule P 显示逻辑写死了 `vol > 50`，与 `turning_points.py` 中的动态 80 分位不一致。
-
-**操作**：`_compute()` 中不再手工重算规则状态，改为从 `df` 列直接读取 `latest["rule_panic"]` 等。
-
-**问题 2**：Rule M 在 UI 中永远显示 False。
-
-**操作**：同上，改为直接从 `latest["rule_micro"]` 读取。
-
-**问题 3**：`sensitivity_analysis()` 只用 3 条规则（RSI+DD+Cheap），而主模型是 5 条规则。
-
-**操作**：重写 `sensitivity_analysis`，使用 `_compute_five_rules()` 辅助函数，与主模型完全一致。此前 REPORT 中 Precision 80% 的错误数字就是来自 3 规则简化模型。
-
-**问题 4**：`mfe_mae_summary()` 对 MAE 列也计算 `win_rate`，而 MAE 始终 ≤0，`win_rate` 恒为 0 毫无意义。
-
-**操作**：区分列类型——ret/mfe 列用 `win_rate(>0)`，mae 列改用 `pct_exceed_5pct(<-5%)`。
-
-### 第二轮：FN 虚高、min_periods、列名
-
-**问题 5**：`evaluate_signals()` 的 `bottoms` 包含全部 18 个历史底部，而 `sigs` 仅来自测试期。历史底部在测试期必然找不到信号，全部错误计入 FN。
-
-**操作**：添加 `bottoms_in_test` 过滤——先按 `label==1` 和时间区间筛选，再计算 FN。同时新增双层指标：`precision`（信号级）和 `recall_bottom`（底部级）。
-
-**问题 6**：`_compute_five_rules()` 中 Rule C 的 `rolling(260)` 缺少 `min_periods=52`，与主模型不一致。
-
-**操作**：添加 `min_periods=52`。
-
-**问题 7**：`label_turning_points()` docstring 写 `label_desc`，实际返回列名为 `desc`。
-
-**操作**：列名改为 `label_desc`。
-
-### 第三轮：CPI 失真、margin 对齐、RSI 算法
-
-**问题 8**：`fred_source.py` 的 `_cpi_to_yoy()` 使用 `pct_change(periods=12)`——数据已 `resample("D").ffill()` 变为日频，12 期 = 12 天涨幅，而非同比。
-
-**操作**：改用 `df["value"].shift(freq=pd.DateOffset(years=1))` 精确对齐一年前。
-
-**问题 9**：`akshare_source.py` 的 `fetch_margin_data()` 沪深相加使用 DataFrame 整数 Index 对齐，而非 date 对齐。sh 和 sz 各自过滤后保留原始 RangeIndex，不同日期对应不同 Index 位置，加法产生大量 NaN。
-
-**操作**：先用 `merge(on="date")` 对齐，再相加。
-
-**问题 10**：`akshare_source.py` 的 `fetch_cn_ppi()` 使用 `[c for c if "同比" in str(c)][0]` 动态取列名。
-
-**操作**：改为固定列名 `"当月同比增长"`，与其他方法一致。
-
-**问题 11**：RSI 使用 `rolling(period).mean()`（SMA），报告声称 Wilder 平滑。
-
-**操作**：改为 `ewm(alpha=1/period, adjust=False).mean()`，即 Wilder smoothing。SMA RSI = 28.8（触发），Wilder RSI = 33.3（不触发），Wilder 更保守。
-
-**问题 12**：价格分位使用 `(x.iloc[-1] > x).mean() * 100`，非标准 percentile 定义。
-
-**操作**：改为 `scipy.stats.percentileofscore(x, x.iloc[-1], kind='rank')`。
-
-### 第四轮：死代码清理
-
-**操作**：
-- 删除 `config/settings.py`、`config/factor_registry.py`、整个 `config/` 目录
-- 删除 `src/factors/`（全部 44 个旧因子类）
-- 删除 `src/features/screening.py`、`src/utils/`
-- 删除 `src/models/evaluate.py`、`src/models/classifier.py`、`src/models/regressor.py`、`src/models/train.py`、`src/models/train_v2.py`、`src/models/validate.py`
-- 删除 `src/backtest/simple_backtest.py`
-- `fred_source.py` 删除未使用的 `__init__` 和相关 import
-- `manual_input.py` 和 `yfinance_source.py` 将 `config.settings` import 改为内联路径定义
-
-清理后保留 22 个文件。
-
----
-
-## 第五章：方法论深度重构 V4
-
-### 核心批判（外部审查）
-
-1. 标签定义的 look-ahead bias：`argrelextrema(order=8)` 使用未来 8 周信息
-2. ±2 周容忍区间叠加后，一个"底部区域"长达 12-16 周，大量自然企稳被计入成功
-3. 小样本（18 个底部）下统计不可靠
-4. 连续信号重复计数，Precision 虚高
-5. 规则可能高度共线（RSI/DD/Cheap 都源于价格下跌）
-6. MFE/MAE 前向窗口重叠，非独立样本
-7. 人工阈值 = 数据挖掘
-8. 用 Precision/Recall 评估 regime detection 不合适
-
-### V4.0：标签改为前向收益
-
-**操作**：
-1. 创建 `label_buying_opportunities()`：
-   ```python
-   # 时刻 T 买入, 持有 13 周
-   # 总收益 > 5% AND 前 4 周最大回撤 > -8%
-   # → label = 1（好买点）
-   ```
-2. 126/429（29.4%）为好买点（vs V3 的 18 个局部极值）
-3. 仅 12/18（67%）的 V3 底部是 V4 好买点——局部极值 ≠ 可盈利买点
-
-### V4.1：Triple Barrier + 条件期望 + 条件概率
-
-**操作**：
-1. 创建 `triple_barrier_labels()`：路径依赖，先触及 +8% = SUCCESS，先触及 -5% = FAIL，到期未触及 = NEUTRAL
-2. 创建 `collapse_labels()`：连续同向标签合并为独立机会，134→12
-3. 创建 `conditional_return_analysis()`：比较 E[ret|Armed] vs E[ret]
-4. 创建 `rule_conditional_prob()`：计算 P(A=1|B=1) 替代 Pearson r
-5. 创建 `collapse_signals()`：连续 Armed 信号合并为交易机会
-6. 更新 MFE/MAE：13 周 lockout 防止窗口重叠，新增 benchmark 随机买入对照
-
-**关键发现**：
-- P(DD=1|RSI=1) = 1.0（RSI 超卖时回撤必超 -10%），但 P(RSI=1|DD=1) = 0.04
-- RSI-DD 条件概率 r=0.18，规则之间具有实质性独立性
-- E[ret|Armed] = +8.4%，E[ret] 无条件 = +0.7%，uplift = +7.7%
-- Benchmark 对照：13 周 Armed +8.4% vs 随机买入 +1.8%，alpha = +6.6%
-
-### V4.2：去前瞻偏差 + Barrier 敏感性
-
-**操作**：
-1. `collapse_signals`：保留 cluster **第一条**（最早可操作），而非最高 score（实盘无法判断）
-2. 创建 `barrier_sensitivity()`：测试 (+6/+8/+10) × (-3/-5/-7) 共 9 组参数
-3. CPI 同比改用 `pd.DateOffset(years=1)` 处理闰年
-
-**关键发现**：uplift 在全部 9 组参数下稳定在 +7.9%，不依赖特定 barrier 参数选择。
-
----
-
-## 第六章：实用化改造 V4.3
-
-### Distance-to-Trigger（反推目标价）
-
-**操作**：
-1. 创建 `distance_to_trigger()`：
-   - Rule D：`trigger = 13周最高价 × 0.90`
-   - Rule C：`trigger = 5年价格序列第 15 百分位`
-   - Rule R：近似值（RSI 递归无法精确反推）
-2. 在 `tracker.py` 的 CLI 输出中添加"距离触发"段
-3. 每天输出：当前价 → 触发价 → 还需跌多少
-
-### 三级警报系统
-
-**操作**：
-1. 创建 `alert_level()`：
-   - SILENT：Score=0，距触发 >3%
-   - YELLOW：Score=1 或距触发 <3%
-   - RED：Score≥2 且之前 <2（状态翻转）
-2. 在 `tracker.py` 中读取上一轮 Score（从 `signal_history.csv`）来判断是否状态翻转
-
-### 水位线 Dashboard
-
-**操作**：
-1. 创建 `app/dashboard.py`，生成自包含 HTML 文件
-2. 使用 Lightweight Charts（CDN 加载，无需安装）
-3. 走势图上叠加两条水平虚线：红线（回撤触发价）和绿线（估值触发价）
-4. 仓位建议：Score 0-1 → 0%，Score 2 → 15-30%，Score 3 → 50%，Score 4-5 → 70%
-5. 规则状态、历史 Armed 信号表、关键指标面板
-
-### 推送通知模块
-
-**操作**：
-1. 创建 `app/notify.py`：
-   - `push_serverchan()`：Server酱（免费微信推送）
-   - `push_pushdeer()`：PushDeer
-   - `push_webhook()`：自定义 Webhook
-   - `push()`：尝试所有渠道 + GitHub Actions summary
-2. SILENT 静默不推送，YELLOW/RED 自动推送
-3. `--test` 模式强制发送测试推送验证配置
-4. `--dry-run` 模式仅打印不推送
-
-### GitHub Actions CI 配置
-
-**操作**：
-1. 安装 Server酱 → 获取 SendKey
-2. Windows 设置永久环境变量：
-   ```powershell
-   [Environment]::SetEnvironmentVariable("PUSH_KEY", "SCT...", "User")
-   ```
-3. 项目推送到 GitHub：
-   ```bash
-   git init && git add . && git commit -m "..."
-   git remote add origin https://github.com/ytzmzmq/financial_analysis.git
-   git push -u origin main
-   ```
-4. GitHub Settings → Secrets → 添加 `PUSH_KEY`
-5. 创建 `.github/workflows/medical_tracker.yml`：每交易日 14:45 运行
-6. 调试 CI 问题：
-   - `grep -oP` 兼容性 → 改用 Python `ci_parse.py`
-   - `matplotlib` ModuleNotFoundError → 删除未使用的 import（CI 不装但文件顶部 import 了）
-   - 网络超时 → 加 `timeout-minutes: 20`、`timeout 900` 命令
-   - 权限不足 → 添加 `permissions: contents: write, issues: write`
-   - `git push` 失败时不影响 CI 状态 → 加 `|| true`
-
-### 本地 vs 云端
-
-- 本地：`python app/notify.py`（CLI）或 `python app/dashboard.py`（生成看板）
-- 云端：GitHub Actions 每交易日自动运行，网络波动时需手动重试 push
-- Cloudflare 加速：部分 push 失败可通过 `gh auth login` 或设置代理解决
-
----
-
-## 最终系统
-
-### 文件清单
-
-```
-financial_analysis/
-├── REPORT.md                              # 方法论报告 V4.3
-├── PROGRESS.md                            # 本文件
-├── requirements.txt
-├── app/
-│   ├── tracker.py                         # CLI 跟踪器
-│   ├── dashboard.py                       # HTML 看板生成器
-│   ├── notify.py                          # 推送通知模块
-│   └── ci_parse.py                        # CI 输出解析
-├── src/
-│   ├── data_fetcher/
-│   │   ├── __init__.py
-│   │   ├── akshare_source.py              # AKShare 数据采集
-│   │   ├── fred_source.py                 # FRED 数据采集
-│   │   ├── yfinance_source.py            # Yahoo Finance（备用）
-│   │   ├── manual_input.py               # 手动 CSV 导入
-│   │   └── ocr_capture.py                # 截图 OCR
-│   └── models/
-│       ├── __init__.py
-│       └── turning_points.py              # 核心：Triple Barrier + 五规则
-│                                          # + Bootstrap + 条件期望
-│                                          # + 距离触发 + 警报
-├── .github/workflows/medical_tracker.yml  # 每交易日 14:45 自动运行
-├── .gitignore
-└── data/manual/_template.csv
-```
-
-## 第八章：实时看板与 ETF 代理（最新）
-
-### 实时看板服务器
-
-创建 `app/server.py`：HTTP 服务器，浏览器打开 `http://127.0.0.1:8888`，F5 刷新即拉取最新数据重新计算。
-
-### ETF 代理实时价格
-
-`fetch_sw_medical` 通过 `ak.fund_etf_spot_em()` 抓取 512290（生物医药ETF）盘中涨跌幅，等比例映射到申万医药指数。周末自动跳过。
-
-### 极速模式
-
-server.py 仅拉取 `sw_medical` 数据（跳过宏观数据），耗时从 14s 降至 <1s。
-
-### 试算功能
-
-网页右上角输入框，输入任意点位（如 7430），点击按钮即基于该价格重新计算 Score 和触发价。
-
-### 图表去重
-
-lightweight-charts 遇重复时间轴会崩溃，前端加 `uniqueData` 去重+排序。
-
-### 近期 Bug 修复
-
-- `collapse_labels` cluster 逻辑错误：`clusters[1:]` → `cluster[1:]`
-- `alert_level` 返回 `"green"` → `"silent"`（notify.py 只识别 silent/yellow/red）
-- Rule C 触发价：`rank().idxmin()` → `quantile(0.15)`
-- ETF 接口：`stock_zh_a_spot_em()` → `fund_etf_spot_em()` → 最终改用直接 `requests` 调用东方财富 API
-- tracker 同一天重复追加 history → 按日期去重
-- 日期截断导致本周数据丢失 → 配合实时代理移除截断
-- **实时数据（V4.5）**：最终方案——Sina 财经 API 抓取 512170(医疗ETF华宝)实时涨跌幅，等比例映射 801150。国内网络无障碍，映射误差 <0.1%。全量稳健性检验通过：所有指标与原始 EOD 数据源一致（uplift +7.7%, CI [+0.2%,+16.3%]）。图表库首次下载后内联到 HTML，完全离线可用
-
-### 核心模块 `turning_points.py` 功能清单
-
-| 函数/类 | 用途 |
-|---------|------|
-| `triple_barrier_labels()` | 路径依赖标签（+8%/-5%，13周） |
-| `collapse_labels()` | 连续同向标签合并 |
-| `TurningPointDetector` | 五规则探测器（RSI Wilder/DD/Cheap/Panic/Micro） |
-| `collapse_signals()` | 连续 Armed 信号合并（保留第一条） |
-| `rule_conditional_prob()` | 条件概率 P(A=1\|B=1) |
-| `conditional_return_analysis()` | E[ret\|Armed] vs E[ret] |
-| `forward_return_analysis()` | 去重叠 + benchmark 对照 |
-| `mfe_mae_summary()` | 区分 armed/benchmark 汇总 |
-| `bootstrap_ci()` | Bootstrap 置信区间 |
-| `sensitivity_analysis()` | 五规则参数网格搜索 |
-| `barrier_sensitivity()` | Triple Barrier 参数敏感性 |
-| `distance_to_trigger()` | 反推目标价（Rule D/C/R） |
-| `alert_level()` | 三级警报（SILENT/YELLOW/RED） |
-| `evaluate_signals()` | 双层评估（信号级 Precision / 底部级 Recall） |
-
-### 使用方式
-
-```bash
-# 本地命令行
-python app/tracker.py                     # 信号 + 距离触发 + 警报
-
-# 推送通知
-python app/notify.py                      # 正常模式（SILENT 自动静默）
-python app/notify.py --test               # 测试推送通道
-python app/notify.py --dry-run            # 仅打印不推送
-
-# 可视化看板
-python app/dashboard.py                   # 生成 dashboard.html
-start dashboard.html                      # 浏览器打开
-
-# 云端（配置 GitHub Secrets 后）
-# 每交易日 14:45 自动运行，YELLOW/RED 自动推送
-```
-
-### 核心结论
-
-- E[ret|Armed] 13周 = +8.4%（unconditional = +0.7%，uplift = +7.7%）
-- Uplift 对 Triple Barrier 参数不敏感（9 组参数组合均稳定在 +7.9%）
-- 条件 Hit ratio = 70%（无条件 = 48%）
-- 定位：极端超跌状态检测 / 风险收益比监控器（非底部预测器）
-
-```
----
-
-## 核心:五阶段因子优化
-`src/models/factor_optimizer.py`
-```python
-"""
-V5.0 因子自动筛选与赋权框架
-
-五阶段:
-  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney, 二值化, 无look-ahead)
-  2. 单因子三漏斗检验 (稀疏度2-15% + 收益>5% + Uplift CI下限>1%)
-  3. 条件概率去重 (P(A|B)>0.65则保留Uplift下限更高的)
-  4. Uplift驱动离散评分卡 (0.5步长, 满分10)
-  5. 阈值滑动寻优 (平衡Uplift与独立机会数)
-"""
-import pandas as pd
-import numpy as np
-from scipy.stats import percentileofscore
-
-
-# ═══════════════════════════════════════════
-# 阶段1: 候选因子池
-# ═══════════════════════════════════════════
-
-def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
-                      pe_w: pd.Series = None, margin_w: pd.Series = None) -> pd.DataFrame:
-    """
-    构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
-    """
-    pool = pd.DataFrame(index=med_w.index)
-
-    # ── 维度1: 估值 (Valuation) ──
-    pool["V1_price_5y_low"] = (
-        med_w.rolling(260, min_periods=52).rank(pct=True) < 0.15
-    ).astype(int)
-
-    ll_52w = med_w.rolling(52).min()
-    pool["V2_near_52w_low"] = ((med_w / ll_52w - 1) < 0.05).astype(int)
-
-    down_streak = (med_w.pct_change() < 0).astype(int)
-    pool["V3_down_8w"] = (down_streak.rolling(8).sum() >= 7).astype(int)
-
-    # V4: PE估值冰点 (真实PE < 5年15%分位, 无PE数据则退化为价格分位)
-    if pe_w is not None and len(pe_w.dropna()) > 52:
-        pe_aligned = pe_w.reindex(med_w.index).ffill()
-        pool["V4_true_pe_low"] = (
-            pe_aligned.rolling(260, min_periods=52).rank(pct=True) < 0.15
-        ).astype(int)
-
-    # ── 维度2: 量价冰点 (Liquidity) ──
-    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
-    pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
-
-    vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
-    pool["L3_vol_shrink"] = (
-        vol < vol.rolling(104, min_periods=52).quantile(0.25)
-    ).astype(int)
-
-    # L4: 地量冰点 (成交量<2年10%分位, 无人问津)
-    if vol_w is not None and len(vol_w.dropna()) > 52:
-        vol_aligned = vol_w.reindex(med_w.index).ffill()
-        pool["L4_vol_freezing"] = (
-            vol_aligned.rolling(104, min_periods=52).rank(pct=True) < 0.10
-        ).astype(int)
-
-    # ── 维度3: 动能衰竭 (Momentum) ──
-    skew = med_w.pct_change().rolling(13).skew()
-    pool["M1_skew_neg"] = (skew < -1.5).astype(int)
-    pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
-
-    macd_hist = _macd_histogram(med_w)
-    pool["M3_macd_low"] = (macd_hist < macd_hist.rolling(13).min()).astype(int)
-
-    # ── 维度4: 资金背离 (Smart Money) ──
-    ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
-    pool["S1_divergence"] = (
-        (pool["V2_near_52w_low"] == 1) &
-        (_rsi_wilder(med_w, 14) > ll_rsi + 5)
-    ).astype(int)
-
-    weekly_ret = med_w.pct_change() * 100
-    pool["S2_down_slowing"] = (
-        (weekly_ret < 0) & (weekly_ret > weekly_ret.rolling(4).mean())
-    ).astype(int)
-
-    # S3: 融资底背离 (价格13周新低 + 融资4周逆势加仓)
-    if margin_w is not None and len(margin_w.dropna()) > 20:
-        margin_aligned = margin_w.reindex(med_w.index).ffill()
-        price_13w_low = (med_w == med_w.rolling(13).min()).astype(int)
-        margin_chg_4w = margin_aligned.pct_change(4)
-        pool["S3_margin_diverge"] = (
-            (price_13w_low == 1) & (margin_chg_4w > 0)
-        ).astype(int)
-
-    return pool.fillna(0).astype(int)
-
-
-def _rsi_wilder(close, period=14):
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = (-delta).clip(lower=0)
-    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
-
-
-def _macd_histogram(close, fast=12, slow=26, signal=9):
-    ef = close.ewm(span=fast, adjust=False).mean()
-    es = close.ewm(span=slow, adjust=False).mean()
-    return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
-
-
-# ═══════════════════════════════════════════
-# 阶段2: 单因子三漏斗检验
-# ═══════════════════════════════════════════
-
-def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
-    """Bootstrap 95% CI for mean"""
-    if len(data) < 4:
-        return (np.nan, np.nan)
-    rng = np.random.RandomState(seed)
-    means = []
-    n = len(data)
-    for _ in range(n_iter):
-        idx = rng.choice(n, size=n, replace=True)
-        means.append(np.mean(data[idx]))
-    means = np.array(means)
-    return (np.percentile(means, 2.5), np.percentile(means, 97.5))
-
-
-def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
-                   forward_weeks: int = 13) -> pd.DataFrame:
-    """
-    三漏斗检验：稀疏度 → 收益 → 置信度
-    """
-    n_total = len(pool)
-    # 无条件13周期望收益
-    all_rets = np.array([
-        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-        for i in range(n_total - forward_weeks)
-    ])
-    e_uncond = np.mean(all_rets)
-
-    results = []
-    for col in pool.columns:
-        triggered = pool[col] == 1
-        n_triggered = triggered.sum()
-
-        # 漏斗1: 稀疏度 2%-15%
-        freq = n_triggered / n_total
-        if freq < 0.02 or freq > 0.15:
-            continue
-
-        # 漏斗2: 条件期望收益 > 5%
-        fwd_rets = []
-        for i in range(n_total - forward_weeks):
-            if triggered.iloc[i]:
-                fwd_rets.append(
-                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-                )
-        fwd_rets = np.array(fwd_rets)
-        e_cond = np.mean(fwd_rets)
-        if e_cond <= 5.0:
-            continue
-
-        # 漏斗3: Uplift CI下限 > 1%
-        uplift_vals = fwd_rets - e_uncond
-        ci_low, ci_high = bootstrap_ci(uplift_vals)
-        if np.isnan(ci_low) or ci_low <= 1.0:
-            continue
-
-        results.append({
-            "factor": col,
-            "dimension": col[:2],  # V/L/M/S
-            "freq": freq,
-            "e_cond": e_cond,
-            "e_uncond": e_uncond,
-            "uplift": e_cond - e_uncond,
-            "uplift_ci_low": ci_low,
-            "uplift_ci_high": ci_high,
-            "n_signals": n_triggered,
-        })
-
-    return pd.DataFrame(results).sort_values("uplift_ci_low", ascending=False)
-
-
-# ═══════════════════════════════════════════
-# 阶段3: 条件概率去重
-# ═══════════════════════════════════════════
-
-def deduplicate_factors(pool: pd.DataFrame, screened: pd.DataFrame,
-                         corr_threshold: float = 0.65) -> list:
-    """条件概率去重：P(A|B)>0.65 则保留Uplift CI下限更高的"""
-    survivors = screened["factor"].tolist()
-    removed = []
-
-    for i in range(len(survivors)):
-        if survivors[i] in removed:
-            continue
-        for j in range(i + 1, len(survivors)):
-            if survivors[j] in removed:
-                continue
-            a, b = survivors[i], survivors[j]
-            # P(A=1 | B=1)
-            b_true = pool[pool[b] == 1]
-            p_a_given_b = b_true[a].mean() if len(b_true) > 0 else 0
-            p_b_given_a = pool[pool[a] == 1][b].mean() if (pool[a]==1).sum() > 0 else 0
-
-            if max(p_a_given_b, p_b_given_a) > corr_threshold:
-                # 保留 Uplift CI 下限更高的
-                ci_a = screened[screened["factor"] == a]["uplift_ci_low"].values[0]
-                ci_b = screened[screened["factor"] == b]["uplift_ci_low"].values[0]
-                if ci_a >= ci_b:
-                    removed.append(b)
-                else:
-                    removed.append(a)
-
-    return [f for f in survivors if f not in removed]
-
-
-# ═══════════════════════════════════════════
-# 阶段4: Uplift驱动评分卡
-# ═══════════════════════════════════════════
-
-def build_scoring_card(screened: pd.DataFrame, final_factors: list,
-                        max_score: float = 10.0) -> pd.DataFrame:
-    """
-    按Uplift贡献度分配权重，离散化到0.5步长。
-    """
-    sub = screened[screened["factor"].isin(final_factors)].copy()
-    total_uplift = sub["uplift"].sum()
-    sub["raw_weight"] = sub["uplift"] / total_uplift
-    sub["raw_score"] = sub["raw_weight"] * max_score
-    sub["discrete_score"] = (sub["raw_score"] * 2).round() / 2  # 四舍五入到0.5
-    # 确保不低于0.5
-    sub["discrete_score"] = sub["discrete_score"].clip(lower=0.5)
-    # 总分归一化到max_score
-    scale = max_score / sub["discrete_score"].sum()
-    sub["final_score"] = (sub["discrete_score"] * scale * 2).round() / 2
-    return sub[["factor", "dimension", "uplift", "uplift_ci_low",
-                "raw_weight", "final_score"]].sort_values("final_score", ascending=False)
-
-
-# ═══════════════════════════════════════════
-# 阶段5: 阈值滑动寻优
-# ═══════════════════════════════════════════
-
-def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
-                           med_w: pd.Series, forward_weeks: int = 13) -> pd.DataFrame:
-    """
-    滑动阈值, 输出每个阈值下的Uplift和独立机会数。
-    """
-    # 计算加权总分
-    total_score = pd.Series(0, index=pool.index, dtype=float)
-    for _, row in scoring.iterrows():
-        f = row["factor"]
-        if f in pool.columns:
-            total_score += pool[f] * row["final_score"]
-
-    n_total = len(pool)
-    all_rets = np.array([
-        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-        for i in range(n_total - forward_weeks)
-    ])
-    e_uncond = np.mean(all_rets)
-
-    # 去重叠信号
-    def count_independent(triggered: np.ndarray, min_gap: int = 4) -> int:
-        dates = np.where(triggered)[0]
-        if len(dates) == 0:
-            return 0
-        count = 1
-        last = dates[0]
-        for d in dates[1:]:
-            if d - last >= min_gap:
-                count += 1
-                last = d
-        return count
-
-    results = []
-    thresholds = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
-    for thresh in thresholds:
-        triggered = (total_score >= thresh).values
-        n_independent = count_independent(triggered)
-
-        fwd_rets = []
-        for i in range(n_total - forward_weeks):
-            if triggered[i]:
-                fwd_rets.append(
-                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-                )
-        fwd_rets = np.array(fwd_rets)
-        e_cond = np.mean(fwd_rets) if len(fwd_rets) > 0 else np.nan
-        uplift = e_cond - e_uncond if not np.isnan(e_cond) else np.nan
-        ci_low, ci_high = bootstrap_ci(fwd_rets) if len(fwd_rets) >= 4 else (np.nan, np.nan)
-
-        results.append({
-            "threshold": thresh,
-            "n_independent": n_independent,
-            "n_raw": int(triggered.sum()),
-            "e_cond": e_cond,
-            "uplift": uplift,
-            "uplift_ci_low": ci_low,
-            "uplift_ci_high": ci_high,
-        })
-
-    return pd.DataFrame(results)
-
-
-# ═══════════════════════════════════════════
-# 一键运行
-# ═══════════════════════════════════════════
-
-def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
-                       pe_w: pd.Series = None, margin_w: pd.Series = None) -> dict:
-    """执行完整五阶段优化, 返回所有结果"""
-    print("=" * 60)
-    print("  V5.0 因子自动筛选与赋权框架")
-    print("=" * 60)
-
-    # 阶段1
-    print("\n[阶段1] 构建候选因子池...")
-    pool = build_factor_pool(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w)
-    print(f"  候选因子: {len(pool.columns)} 个")
-
-    # 阶段2
-    print("\n[阶段2] 单因子三漏斗检验...")
-    screened = screen_factors(pool, med_w)
-    print(f"  通过筛选: {len(screened)}/{len(pool.columns)}")
-    if len(screened) == 0:
-        print("  ⚠ 无因子通过筛选!")
-        return {}
-    for _, r in screened.iterrows():
-        print(f"    {r['factor']:20s} | freq={r['freq']:.1%} | E={r['e_cond']:+.1f}% | Uplift={r['uplift']:+.1f}% | CI=[{r['uplift_ci_low']:+.1f}%,{r['uplift_ci_high']:+.1f}%]")
-
-    # 阶段3
-    print("\n[阶段3] 条件概率去重...")
-    final = deduplicate_factors(pool, screened)
-    print(f"  去重后: {len(final)}/{len(screened)}")
-    print(f"  入选: {final}")
-
-    # 阶段4
-    print("\n[阶段4] 评分卡赋权...")
-    scoring = build_scoring_card(screened, final)
-    for _, r in scoring.iterrows():
-        print(f"    {r['factor']:20s} | Uplift={r['uplift']:+.1f}% | 得分={r['final_score']:.1f}")
-
-    # 阶段5
-    print("\n[阶段5] 阈值滑动寻优...")
-    threshold_df = threshold_optimization(pool, scoring, med_w)
-    # 找最优: 独立机会 >=5 且 uplift CI下限最高的
-    candidates = threshold_df[(threshold_df["n_independent"] >= 5)]
-    if len(candidates) > 0:
-        best = candidates.sort_values("uplift_ci_low", ascending=False).iloc[0]
-        print(f"  最优阈值: {best['threshold']} (机会={int(best['n_independent'])}, Uplift={best['uplift']:+.1f}%)")
-    print("\n" + threshold_df.to_string(index=False))
-
-    return {
-        "pool": pool,
-        "screened": screened,
-        "final_factors": final,
-        "scoring": scoring,
-        "threshold_analysis": threshold_df,
-    }
 
 ```
 ---
@@ -1571,16 +724,20 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
 # 10. Distance-to-Trigger (反推目标价)
 # ═══════════════════════════════════════════
 
-def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
+def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series, margin_w: pd.Series = None) -> dict:
     """计算当前价格距离 S3 (新低背离) 和 V1 (估值冰点) 触发的价位差距"""
     latest = df.iloc[-1]
     curr_price = latest['price']
 
-    # S3 (融资背离触发底线): 跌破过去12周最低点 = 创13周新低
+    # S3 触发条件: 价格创13周新低 AND 融资4周逆势加仓。两者缺一不可
+    trigger_s3 = np.nan
     if len(med_w) >= 13:
-        trigger_s3 = med_w.iloc[-13:-1].min()
-    else:
-        trigger_s3 = np.nan
+        margin_ok = False
+        if margin_w is not None and len(margin_w) >= 5:
+            margin_chg_4w = margin_w.iloc[-1] / margin_w.iloc[-5] - 1
+            margin_ok = margin_chg_4w > 0
+        if margin_ok:
+            trigger_s3 = med_w.iloc[-13:-1].min()
     triggered_s3 = bool(latest.get('rule_S3', 0))
     pct_away_s3 = (trigger_s3 / curr_price - 1) * 100 if not triggered_s3 and not np.isnan(trigger_s3) else 0.0
 
@@ -1627,6 +784,373 @@ def alert_level(df: pd.DataFrame, prev_score: float | None = None) -> dict:
         else:
             return {"level": "silent",
                     "message": "常态区间。"}
+
+```
+---
+
+## 核心:五阶段因子优化
+`src/models/factor_optimizer.py`
+```python
+"""
+V5.0 因子自动筛选与赋权框架
+
+五阶段:
+  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney, 二值化, 无look-ahead)
+  2. 单因子三漏斗检验 (稀疏度2-15% + 收益>5% + Uplift CI下限>1%)
+  3. 条件概率去重 (P(A|B)>0.65则保留Uplift下限更高的)
+  4. Uplift驱动离散评分卡 (0.5步长, 满分10)
+  5. 阈值滑动寻优 (平衡Uplift与独立机会数)
+"""
+import pandas as pd
+import numpy as np
+from scipy.stats import percentileofscore
+
+
+# ═══════════════════════════════════════════
+# 阶段1: 候选因子池
+# ═══════════════════════════════════════════
+
+def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
+                      pe_w: pd.Series = None, margin_w: pd.Series = None) -> pd.DataFrame:
+    """
+    构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
+    """
+    pool = pd.DataFrame(index=med_w.index)
+
+    # ── 维度1: 估值 (Valuation) ──
+    pool["V1_price_5y_low"] = (
+        med_w.rolling(260, min_periods=52).rank(pct=True) < 0.15
+    ).astype(int)
+
+    ll_52w = med_w.rolling(52).min()
+    pool["V2_near_52w_low"] = ((med_w / ll_52w - 1) < 0.05).astype(int)
+
+    down_streak = (med_w.pct_change() < 0).astype(int)
+    pool["V3_down_8w"] = (down_streak.rolling(8).sum() >= 7).astype(int)
+
+    # V4: PE估值冰点 (真实PE < 5年15%分位, 无PE数据则退化为价格分位)
+    if pe_w is not None and len(pe_w.dropna()) > 52:
+        pe_aligned = pe_w.reindex(med_w.index).ffill()
+        pool["V4_true_pe_low"] = (
+            pe_aligned.rolling(260, min_periods=52).rank(pct=True) < 0.15
+        ).astype(int)
+
+    # ── 维度2: 量价冰点 (Liquidity) ──
+    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
+    pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
+
+    vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
+    pool["L3_vol_shrink"] = (
+        vol < vol.rolling(104, min_periods=52).quantile(0.25)
+    ).astype(int)
+
+    # L4: 地量冰点 (成交量<2年10%分位, 无人问津)
+    if vol_w is not None and len(vol_w.dropna()) > 52:
+        vol_aligned = vol_w.reindex(med_w.index).ffill()
+        pool["L4_vol_freezing"] = (
+            vol_aligned.rolling(104, min_periods=52).rank(pct=True) < 0.10
+        ).astype(int)
+
+    # ── 维度3: 动能衰竭 (Momentum) ──
+    skew = med_w.pct_change().rolling(13).skew()
+    pool["M1_skew_neg"] = (skew < -1.5).astype(int)
+    pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
+
+    macd_hist = _macd_histogram(med_w)
+    pool["M3_macd_low"] = (macd_hist < macd_hist.rolling(13).min()).astype(int)
+
+    # ── 维度4: 资金背离 (Smart Money) ──
+    ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
+    pool["S1_divergence"] = (
+        (pool["V2_near_52w_low"] == 1) &
+        (_rsi_wilder(med_w, 14) > ll_rsi + 5)
+    ).astype(int)
+
+    weekly_ret = med_w.pct_change() * 100
+    pool["S2_down_slowing"] = (
+        (weekly_ret < 0) & (weekly_ret > weekly_ret.rolling(4).mean())
+    ).astype(int)
+
+    # S3: 融资底背离 (价格13周新低 + 融资4周逆势加仓)
+    if margin_w is not None and len(margin_w.dropna()) > 20:
+        margin_aligned = margin_w.reindex(med_w.index).ffill()
+        price_13w_low = (med_w == med_w.rolling(13).min()).astype(int)
+        margin_chg_4w = margin_aligned.pct_change(4)
+        pool["S3_margin_diverge"] = (
+            (price_13w_low == 1) & (margin_chg_4w > 0)
+        ).astype(int)
+
+    return pool.fillna(0).astype(int)
+
+
+def _rsi_wilder(close, period=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def _macd_histogram(close, fast=12, slow=26, signal=9):
+    ef = close.ewm(span=fast, adjust=False).mean()
+    es = close.ewm(span=slow, adjust=False).mean()
+    return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+
+
+# ═══════════════════════════════════════════
+# 阶段2: 单因子三漏斗检验
+# ═══════════════════════════════════════════
+
+def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
+    """Bootstrap 95% CI for mean"""
+    if len(data) < 4:
+        return (np.nan, np.nan)
+    rng = np.random.RandomState(seed)
+    means = []
+    n = len(data)
+    for _ in range(n_iter):
+        idx = rng.choice(n, size=n, replace=True)
+        means.append(np.mean(data[idx]))
+    means = np.array(means)
+    return (np.percentile(means, 2.5), np.percentile(means, 97.5))
+
+
+def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
+                   forward_weeks: int = 13) -> pd.DataFrame:
+    """
+    三漏斗检验：稀疏度 → 收益 → 置信度
+    """
+    n_total = len(pool)
+    # 无条件13周期望收益
+    all_rets = np.array([
+        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+        for i in range(n_total - forward_weeks)
+    ])
+    e_uncond = np.mean(all_rets)
+
+    results = []
+    for col in pool.columns:
+        triggered = pool[col] == 1
+        n_triggered = triggered.sum()
+
+        # 漏斗1: 稀疏度 2%-15%
+        freq = n_triggered / n_total
+        if freq < 0.02 or freq > 0.15:
+            continue
+
+        # 漏斗2: 条件期望收益 > 5%
+        fwd_rets = []
+        for i in range(n_total - forward_weeks):
+            if triggered.iloc[i]:
+                fwd_rets.append(
+                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+                )
+        fwd_rets = np.array(fwd_rets)
+        e_cond = np.mean(fwd_rets)
+        if e_cond <= 5.0:
+            continue
+
+        # 漏斗3: Uplift CI下限 > 1%
+        uplift_vals = fwd_rets - e_uncond
+        ci_low, ci_high = bootstrap_ci(uplift_vals)
+        if np.isnan(ci_low) or ci_low <= 1.0:
+            continue
+
+        results.append({
+            "factor": col,
+            "dimension": col[:2],  # V/L/M/S
+            "freq": freq,
+            "e_cond": e_cond,
+            "e_uncond": e_uncond,
+            "uplift": e_cond - e_uncond,
+            "uplift_ci_low": ci_low,
+            "uplift_ci_high": ci_high,
+            "n_signals": n_triggered,
+        })
+
+    return pd.DataFrame(results).sort_values("uplift_ci_low", ascending=False)
+
+
+# ═══════════════════════════════════════════
+# 阶段3: 条件概率去重
+# ═══════════════════════════════════════════
+
+def deduplicate_factors(pool: pd.DataFrame, screened: pd.DataFrame,
+                         corr_threshold: float = 0.65) -> list:
+    """条件概率去重：P(A|B)>0.65 则保留Uplift CI下限更高的"""
+    survivors = screened["factor"].tolist()
+    removed = []
+
+    for i in range(len(survivors)):
+        if survivors[i] in removed:
+            continue
+        for j in range(i + 1, len(survivors)):
+            if survivors[j] in removed:
+                continue
+            a, b = survivors[i], survivors[j]
+            # P(A=1 | B=1)
+            b_true = pool[pool[b] == 1]
+            p_a_given_b = b_true[a].mean() if len(b_true) > 0 else 0
+            p_b_given_a = pool[pool[a] == 1][b].mean() if (pool[a]==1).sum() > 0 else 0
+
+            if max(p_a_given_b, p_b_given_a) > corr_threshold:
+                # 保留 Uplift CI 下限更高的
+                ci_a = screened[screened["factor"] == a]["uplift_ci_low"].values[0]
+                ci_b = screened[screened["factor"] == b]["uplift_ci_low"].values[0]
+                if ci_a >= ci_b:
+                    removed.append(b)
+                else:
+                    removed.append(a)
+
+    return [f for f in survivors if f not in removed]
+
+
+# ═══════════════════════════════════════════
+# 阶段4: Uplift驱动评分卡
+# ═══════════════════════════════════════════
+
+def build_scoring_card(screened: pd.DataFrame, final_factors: list,
+                        max_score: float = 10.0) -> pd.DataFrame:
+    """
+    按Uplift贡献度分配权重，离散化到0.5步长。
+    """
+    sub = screened[screened["factor"].isin(final_factors)].copy()
+    total_uplift = sub["uplift"].sum()
+    sub["raw_weight"] = sub["uplift"] / total_uplift
+    sub["raw_score"] = sub["raw_weight"] * max_score
+    sub["discrete_score"] = (sub["raw_score"] * 2).round() / 2  # 四舍五入到0.5
+    # 确保不低于0.5
+    sub["discrete_score"] = sub["discrete_score"].clip(lower=0.5)
+    # 总分归一化到max_score
+    scale = max_score / sub["discrete_score"].sum()
+    sub["final_score"] = (sub["discrete_score"] * scale * 2).round() / 2
+    return sub[["factor", "dimension", "uplift", "uplift_ci_low",
+                "raw_weight", "final_score"]].sort_values("final_score", ascending=False)
+
+
+# ═══════════════════════════════════════════
+# 阶段5: 阈值滑动寻优
+# ═══════════════════════════════════════════
+
+def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
+                           med_w: pd.Series, forward_weeks: int = 13) -> pd.DataFrame:
+    """
+    滑动阈值, 输出每个阈值下的Uplift和独立机会数。
+    """
+    # 计算加权总分
+    total_score = pd.Series(0, index=pool.index, dtype=float)
+    for _, row in scoring.iterrows():
+        f = row["factor"]
+        if f in pool.columns:
+            total_score += pool[f] * row["final_score"]
+
+    n_total = len(pool)
+    all_rets = np.array([
+        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+        for i in range(n_total - forward_weeks)
+    ])
+    e_uncond = np.mean(all_rets)
+
+    # 去重叠信号
+    def count_independent(triggered: np.ndarray, min_gap: int = 4) -> int:
+        dates = np.where(triggered)[0]
+        if len(dates) == 0:
+            return 0
+        count = 1
+        last = dates[0]
+        for d in dates[1:]:
+            if d - last >= min_gap:
+                count += 1
+                last = d
+        return count
+
+    results = []
+    thresholds = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
+    for thresh in thresholds:
+        triggered = (total_score >= thresh).values
+        n_independent = count_independent(triggered)
+
+        fwd_rets = []
+        for i in range(n_total - forward_weeks):
+            if triggered[i]:
+                fwd_rets.append(
+                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+                )
+        fwd_rets = np.array(fwd_rets)
+        e_cond = np.mean(fwd_rets) if len(fwd_rets) > 0 else np.nan
+        uplift = e_cond - e_uncond if not np.isnan(e_cond) else np.nan
+        ci_low, ci_high = bootstrap_ci(fwd_rets) if len(fwd_rets) >= 4 else (np.nan, np.nan)
+
+        results.append({
+            "threshold": thresh,
+            "n_independent": n_independent,
+            "n_raw": int(triggered.sum()),
+            "e_cond": e_cond,
+            "uplift": uplift,
+            "uplift_ci_low": ci_low,
+            "uplift_ci_high": ci_high,
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═══════════════════════════════════════════
+# 一键运行
+# ═══════════════════════════════════════════
+
+def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
+                       pe_w: pd.Series = None, margin_w: pd.Series = None) -> dict:
+    """执行完整五阶段优化, 返回所有结果"""
+    print("=" * 60)
+    print("  V5.0 因子自动筛选与赋权框架")
+    print("=" * 60)
+
+    # 阶段1
+    print("\n[阶段1] 构建候选因子池...")
+    pool = build_factor_pool(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w)
+    print(f"  候选因子: {len(pool.columns)} 个")
+
+    # 阶段2
+    print("\n[阶段2] 单因子三漏斗检验...")
+    screened = screen_factors(pool, med_w)
+    print(f"  通过筛选: {len(screened)}/{len(pool.columns)}")
+    if len(screened) == 0:
+        print("  ⚠ 无因子通过筛选!")
+        return {}
+    for _, r in screened.iterrows():
+        print(f"    {r['factor']:20s} | freq={r['freq']:.1%} | E={r['e_cond']:+.1f}% | Uplift={r['uplift']:+.1f}% | CI=[{r['uplift_ci_low']:+.1f}%,{r['uplift_ci_high']:+.1f}%]")
+
+    # 阶段3
+    print("\n[阶段3] 条件概率去重...")
+    final = deduplicate_factors(pool, screened)
+    print(f"  去重后: {len(final)}/{len(screened)}")
+    print(f"  入选: {final}")
+
+    # 阶段4
+    print("\n[阶段4] 评分卡赋权...")
+    scoring = build_scoring_card(screened, final)
+    for _, r in scoring.iterrows():
+        print(f"    {r['factor']:20s} | Uplift={r['uplift']:+.1f}% | 得分={r['final_score']:.1f}")
+
+    # 阶段5
+    print("\n[阶段5] 阈值滑动寻优...")
+    threshold_df = threshold_optimization(pool, scoring, med_w)
+    # 找最优: 独立机会 >=5 且 uplift CI下限最高的
+    candidates = threshold_df[(threshold_df["n_independent"] >= 5)]
+    if len(candidates) > 0:
+        best = candidates.sort_values("uplift_ci_low", ascending=False).iloc[0]
+        print(f"  最优阈值: {best['threshold']} (机会={int(best['n_independent'])}, Uplift={best['uplift']:+.1f}%)")
+    print("\n" + threshold_df.to_string(index=False))
+
+    return {
+        "pool": pool,
+        "screened": screened,
+        "final_factors": final,
+        "scoring": scoring,
+        "threshold_analysis": threshold_df,
+    }
 
 ```
 ---
@@ -2053,87 +1577,6 @@ class AKShareSource:
 ```
 ---
 
-## 数据:FRED
-`src/data_fetcher/fred_source.py`
-```python
-"""美国宏观经济数据源 —— 通过 FRED (pandas_datareader)"""
-import pandas as pd
-import numpy as np
-
-try:
-    import pandas_datareader.data as web
-except ImportError:
-    web = None
-
-
-class FREDSource:
-    """封装 FRED 数据获取，统一返回 (date, ticker, value) 长表"""
-
-    # FRED 序列 ID → 内部名称
-    SERIES_MAP = {
-        "DGS10": "us10y",          # 10年期美债收益率
-        "DGS2": "us2y",            # 2年期美债收益率
-        "DFII10": "us_tips10y",    # 10年期 TIPS 收益率（实际利率）
-        "FEDFUNDS": "fed_funds",   # 联邦基金利率
-        "CPIAUCSL": "us_cpi",      # CPI (需要手动转为同比)
-        "CPILFESL": "us_core_cpi", # 核心 CPI
-        "UNRATE": "us_unemployment",  # 失业率
-        "T10Y2Y": "us_10y2y_spread",  # 10Y-2Y 利差（直接可用）
-        "DTWEXBGS": "usd_index_tw",   # 贸易加权美元指数
-    }
-
-    def fetch_series(self, fred_code: str, name: str,
-                     start_date: str = "2018-01-01",
-                     end_date: str | None = None) -> pd.DataFrame:
-        """获取单个 FRED 序列"""
-        if web is None:
-            raise ImportError("pandas_datareader not installed")
-        if end_date is None:
-            end_date = pd.Timestamp.now().strftime("%Y-%m-%d")
-        try:
-            data = web.DataReader(fred_code, "fred", start=start_date, end=end_date)
-            data = data.reset_index()
-            data.columns = ["date", "value"]
-            data["ticker"] = name
-            data["date"] = pd.to_datetime(data["date"]).dt.normalize()
-            # 前向填充日期间隔（FRED 只在发布日有值）
-            data = data.set_index("date").resample("D").ffill().reset_index()
-            return data[["date", "ticker", "value"]].dropna(subset=["value"])
-        except Exception as e:
-            print(f"[FRED] Failed to fetch {name} ({fred_code}): {e}")
-            return pd.DataFrame(columns=["date", "ticker", "value"])
-
-    def _cpi_to_yoy(self, df: pd.DataFrame) -> pd.DataFrame:
-        """将 CPI 水平值转为同比变化率"""
-        df = df.copy()
-        # 同比: 使用 DateOffset 精确对齐 (处理闰年)
-        df = df.set_index("date")
-        df["value"] = (df["value"] / df["value"].shift(freq=pd.DateOffset(years=1)) - 1) * 100
-        df = df.reset_index()
-        return df.dropna(subset=["value"])
-
-    def fetch_all(self, start_date: str = "2018-01-01",
-                  end_date: str | None = None) -> dict[str, pd.DataFrame]:
-        """批量拉取所有 FRED 数据"""
-        if end_date is None:
-            end_date = pd.Timestamp.now().strftime("%Y-%m-%d")
-
-        results = {}
-        for fred_code, name in self.SERIES_MAP.items():
-            try:
-                df = self.fetch_series(fred_code, name, start_date, end_date)
-                # CPI 需要转为同比
-                if fred_code in ("CPIAUCSL", "CPILFESL"):
-                    df = self._cpi_to_yoy(df)
-                results[name] = df
-            except Exception as e:
-                print(f"[FRED] Failed to fetch {name}: {e}")
-                results[name] = pd.DataFrame(columns=["date", "ticker", "value"])
-        return results
-
-```
----
-
 ## 应用:CLI跟踪器(V5.1+融资)
 `app/tracker.py`
 ```python
@@ -2201,7 +1644,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         })
 
     from src.models.turning_points import distance_to_trigger, alert_level
-    dist = distance_to_trigger(df, med_w)
+    dist = distance_to_trigger(df, med_w, margin_w=margin_w)
 
     # 读取历史 + 保存今天 (合并为一次IO，避免竞态)
     hist_path = Path("data/processed/signal_history.csv")
@@ -2410,8 +1853,15 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
 
+    from src.data_fetcher.akshare_source import AKShareSource as _AKS
+    margin_df = _AKS().fetch_margin_data("20180101")
+    margin_w = None
+    if not margin_df.empty:
+        m = margin_df.set_index("date")["value"].sort_index()
+        margin_w = m.resample("W-FRI").last().dropna().shift(1)
+
     det = V5Detector()
-    df = det.compute(med_w, vol_w=None, margin_w=None)
+    df = det.compute(med_w, margin_w=margin_w)
     latest = df.iloc[-1]
 
     score = float(latest["score"])
@@ -2421,7 +1871,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
     else:                pct, label, color = 60, "重仓 60% — 多因子触发", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
-    dist = distance_to_trigger(df, med_w)
+    dist = distance_to_trigger(df, med_w, margin_w=margin_w)
 
     weekly_data = []
     for i in range(max(0, len(df) - 104), len(df)):
