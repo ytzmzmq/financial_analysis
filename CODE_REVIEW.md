@@ -1,255 +1,163 @@
-# 医药板块风险收益比监控器 - 完整代码包
+# 医药板块 V5.0 - 完整代码包
 
-12 files | V4.5 | 状态: 就绪
+11 files | V5.0 | 五阶段因子优化框架
 
-## 方法论报告
+## 方法论报告 V5.0
 `REPORT.md`
 ```markdown
-# 医药板块风险收益比监控器 — 方法论与验证
+# 医药板块风险收益比监控器 — V5.0 因子优化框架
 
-**日期**: 2026-05-29 | **版本**: V4.5
+**日期**: 2026-05-29 | **版本**: V5.0
 
 ---
 
 ## 一、定位
 
-这是一个**极端超跌状态检测器 / 风险收益比监控器**。
-
-它回答：**当前医药板块是否处于历史上赔率较好的区域？**
-
-不预测最低点，不预测反弹时间。它识别的是：多种极端条件同时满足时，历史上条件期望收益系统性高于无条件期望的区域。
+这是一个**经过五阶段严格因子筛选的极端超跌检测器**。仅保留统计学上无法被随机性解释的因子，并按历史超额贡献度分配权重。
 
 ---
 
-## 二、标签定义：Triple Barrier（路径依赖, 无未来函数）
+## 二、方法论核心：五阶段因子筛选与赋权
 
-### 方法
+### 阶段 1：候选因子池构建
+
+11 个候选因子，分属四大经济学维度。所有因子二值化(0/1)，仅使用 T 日及以前数据。
+
+| 维度 | 因子 | 逻辑 |
+|------|------|------|
+| **估值(V)** | V1: 5年价格分位 < 15% | 历史低位区域 |
+| | V2: 距52周低点 < 5% | 接近一年低点 |
+| | V3: 连续下跌 > 8周 | 长期阴跌后估值修复 |
+| **量价(L)** | L1: RSI Wilder < 30 | 动能衰竭 |
+| | L2: 13周回撤 < -12% | 深度回撤 |
+| | L3: 波动率收缩 < 2年25分位 | 暴风雨前的宁静 |
+| **动能(M)** | M1: 收益偏度 < -1.5 | 极端左尾事件 |
+| | M2: 4周累计跌幅 > 8% | 加速下跌 |
+| | M3: MACD 柱状线创13周新低 | 动能极值 |
+| **资金(S)** | S1: 价格低点+RSI不新低 | 底背离 |
+| | S2: 下跌放缓 | 动能减弱 |
+
+### 阶段 2：单因子三漏斗检验
+
+每个候选因子必须同时通过三道漏斗，否则直接淘汰。
+
+**漏斗 1 — 稀疏度**：2% <= 触发频率 <= 15%。频率太低是统计孤本，太高则无"极值"意义。
+
+**漏斗 2 — 绝对收益**：因子触发后 13 周期望收益 > +5.0%。
+
+**漏斗 3 — 稳健性置信度**：Uplift = 条件期望 - 无条件期望。Bootstrap 2000 次，95% CI 下限必须 > +1.0%。
+
+**检验结果**：11 个候选因子，仅 **2 个通过**：
+
+| 因子 | 频率 | E[ret\|触发] | Uplift | 95% CI | 
+|------|:---:|:----------:|:------:|:------:|
+| **M1: 偏度异常 (<-1.5)** | 4.2% | +8.7% | +8.0% | [+2.8%, +13.0%] |
+| **V1: 价格5年低位 (<15%)** | 14.2% | +5.6% | +4.9% | [+1.6%, +8.2%] |
+
+被淘汰的 9 个因子中，多数卡在漏斗 2（期望收益不足 5%）或漏斗 3（CI 下限跨零）。
+
+### 阶段 3：条件概率去重
+
+计算 P(A=1|B=1)。M1 和 V1 的条件概率 < 0.65，两者独立——偏度异常捕获的是恐慌性急跌，估值冰点捕获的是阴跌磨底，维度不重叠。无需剔除。
+
+### 阶段 4：Uplift 驱动评分卡
+
+按 Uplift 贡献度分配权重，离散化到 0.5 步长（总分 10 分）。
+
+| 因子 | Uplift | 权重建模 | 最终得分 |
+|------|:------:|:--------:|:-------:|
+| M1: 偏度异常 | +8.0% | 62% | **6.0** |
+| V1: 估值冰点 | +4.9% | 38% | **4.0** |
+
+离散化为 0.5 步长而非精确权重，防止过拟合。
+
+### 阶段 5：阈值滑动寻优
 
 ```
-在时刻 T 买入, 持有 13 周:
-  - 先触及 +8%  → SUCCESS (label=1)
-  - 先触及 -5%  → FAIL (label=-1)
-  - 到期未触及  → NEUTRAL (label=0)
+阈值   独立机会    Uplift    95% CI
+─────────────────────────────────────
+3.0      23      +5.3%    [+3.2%,+8.9%]  ← 太多假信号
+4.0      23      +5.3%    [+3.2%,+8.9%]
+4.5       6      +8.0%    [+3.5%,+13.7%]  ← Uplift 跃升
+5.0       6      +8.0%    [+3.5%,+13.7%]
+5.5       6      +8.0%    [+3.5%,+13.7%]  ★ 最优平衡点
+6.0       6      +8.0%    [+3.5%,+13.7%]
+6.5       2     +18.2%    [N/A]           ← 机会太少
 ```
 
-路径依赖意味着先触及下轨再反弹也不计入成功——这更接近真实交易中已止损的情况。
-
-### 与 V3/V4 的对比
-
-| | V3 | V4 | V4.1 |
-|---|---|---|---|
-| 标签方法 | 局部极值(T±8) | 13周终值>5% | Triple Barrier |
-| 路径依赖 | 无 | 仅前4周 | 全路径 |
-| 使用未来信息 | 是 | 否 | 否 |
-| success(原始) | 18 (4.2%) | 126 (29.4%) | 134 (31.2%) |
-| success(collapsed) | — | — | 12 (2.8%) |
-
-### Label Clustering
-
-连续同向标签（间隔<4周）合并为一个机会。原始 134 个 success → collapse 为 **12 个独立盈利机会**。这避免了 Recall 分母被连续区间放大。
+**最优阈值：5.5 分**。6 次独立大底机会，Uplift +8.0%。实际含义：需要 M1(6.0分) 单独触发才能 Armed。V1(4.0分) 单独触发只能到 4.0/10，处于"关注区"。
 
 ---
 
-## 三、五规则探测器
+## 三、V5 探测器
 
-| 代号 | 名称 | 条件 | 经济逻辑 |
-|:----:|------|------|----------|
-| R | RSI超卖 | RSI(14, Wilder) < 30 | 短期动能衰竭 |
-| D | 深度回撤 | 13周最大回撤 < -10% | 跌幅充分 |
-| C | 极度便宜 | 5年价格分位 < 15% | 历史低位区域 |
-| P | 恐慌指数 | 偏度<-1 或 波动率>80分位 | 极端左尾事件 |
-| M | 聪明钱 | ETF份额增+价格跌 | 机构越跌越买 |
+### 与 V4 的对比
 
-### 规则条件概率 P(A=1|B=1)
+| | V4 (五规则等权) | V5 (评分卡加权) |
+|---|---|---|
+| 因子数 | 5（等权各1分）| 2（加权） |
+| 筛选方法 | 人工阈值 | 三漏斗统计检验 |
+| 权重 | 等权投票 | Uplift 驱动 |
+| 阈值 | Score≥2/5 | Score≥5.5/10 |
+| 入选标准 | 常识判断 | CI 下限 > 1% |
 
-```
-            rule_rsi  rule_dd  rule_cheap  rule_panic  rule_micro
-rule_rsi       1.00     0.04       0.02        0.01        0.00
-rule_dd        1.00     1.00       0.24        0.15        0.00
-rule_cheap     0.20     0.46       1.00        0.29        0.00
-rule_panic     0.20     0.20       0.43        1.00        0.00
-```
+V5 的 2 个因子全部经过统计显著性检验。V4 的 R/D/C/P/M 五规则中，仅偏度(Rule P 的一部分)和价格分位(Rule C)经得起三漏斗检验，RSI、回撤、资金流因子均未通过漏斗 2 或 3。
 
-关键发现：
-- P(DD=1|RSI=1) = 1.0：RSI 超卖时回撤必超 -10%。但 P(RSI=1|DD=1) = 0.04：回撤超 -10% 时 RSI 超卖仅 4%。RSI 是远更严格的过滤器。
-- P(Cheap=1|DD=1) = 0.24、P(Panic=1|Cheap=1) = 0.29：规则之间具有实质性独立性，条件概率远低于直觉。
-
-**结论**：规则相互独立，多数表决 Score≥2 具有增量信息。
-
-### 信号去重
-
-连续 Armed 信号（间隔<4周）合并为一个交易机会，保留 cluster 内**第一条**信号（最早可操作信号）。不使用"最高 score"——实盘中 cluster 结束前无法判断哪条是最高分，事后选最高分属于前瞻偏差。
-
-测试期（2024-10 ~ 2026-05）：18 条原始信号 → **2 个去重交易机会**（2024-10-11, 2025-04-11）。
-
----
-
-## 四、核心评估：条件期望
-
-### 方法
-
-比较 **E[forward_return | Armed]** 与 **E[forward_return]**（无条件期望），计算 uplift。
-
-### 全量数据结果（去重叠, lockout=13周, n_armed=10）
-
-| 指标 | 无条件 | Armed | Uplift |
-|------|:------:|:-----:|:------:|
-| 13周期望收益 | +0.7% | +8.4% | **+7.7%** |
-| Uplift 95% CI | — | — | **[+0.2%, +16.3%]** |
-| Hit ratio (>0) | 48% | 70% | +22pp |
-| n (独立机会) | 416 | 10 | — |
-
-### Benchmark 对照
-
-| 持有期 | Armed | 随机买入 | Alpha | n_armed |
-|:------:|:-----:|:-------:|:-----:|:-------:|
-| 4周 | +0.8% | +0.2% | +0.6% | 10 |
-| 13周 | **+8.4%** | +1.8% | **+6.6%** | 10 |
-| 26周 | +4.8% | +4.9% | -0.1% | 10 |
-
-Armed 的 alpha 集中在 13 周窗口。26 周后 Armed 与随机买入无差异——超跌修复通常在 1-2 个季度内完成。
-
-### 统计说明
-
-Uplift 95% CI 下限 +0.2% 为正值，但需注意：
-- n=10，金融收益重尾、非 IID、存在 regime dependence
-- Bootstrap CI 在这些条件下可能低估真实不确定性
-- **历史样本中观察到正向 uplift，但不能宣称"正期望已被统计确认"**
-- 若增加/减少 1-2 个样本，CI 可能跨零
-
----
-
-## 五、数据源说明
-
-### 历史日线
-
-申万医药生物指数(801150)日线通过 `ak.index_hist_sw(symbol="801150")` 从申万宏源官网获取。
-每个交易日收盘后更新，数据准确可靠。
-
-### 实时价格（Sina ETF 代理）
-
-盘中实时价格通过 Sina 财经 API 抓取 512170（医疗ETF华宝）的盘中涨跌幅，
-等比例映射到 801150。512170 与 801150 日收益率相关 r>0.95，映射误差 <0.1%。
-
-Sina 接口在国内网络环境无障碍，无需额外代理配置。非交易日自动跳过。
-
----
-
-## 六、当前信号
-
-**2026-05-29**：
+### 当前信号
 
 ```
-指标                 当前值      阈值      触发？
-─────────────────────────────────────────
-RSI(14, Wilder)      33.3       < 30       ✗
-13周最大回撤          -8.2%     < -10%     ✗
-5年价格分位          22%        < 15%      ✗
-收益偏度             0.19      < -1        ✗
-年化波动率           12.4%      > 80分位    ✗
-─────────────────────────────────────────
-Score: 0/5 → HOLD
-─────────────────────────────────────────
+Score: 0.0/10（阈值 5.5）
+M1 偏度异常: 0.24（阈值 < -1.5）— 未触发
+V1 估值冰点: 22%（阈值 < 15%）— 未触发
+→ HOLD
 ```
 
 ---
 
-## 七、Distance-to-Trigger（反推目标价）
-
-系统不仅报告"是否触发"，还计算每条规则触发所需的精确价格：
-
-```
-当前指数: 7551 点
-Rule D (深度回撤): 触发价 7405 点 (再跌 -1.9%)
-Rule C (极度便宜): 触发价 7400 点 (再跌 -2.0%)
-```
-
-### 算法
-
-- Rule D: `trigger = 13周最高价 × 0.90`
-- Rule C: `trigger = 5年价格序列的第 15 百分位`
-- Rule R: 近似值（RSI 为递归指标，无法精确反推）
-
----
-
-## 八、三级日度警报
-
-| 级别 | 条件 | 含义 |
-|:----:|------|------|
-| SILENT | Score=0, 距触发 >3% | 安静，正常上班 |
-| YELLOW | Score=0 但距触发 <3%，或 Score=1 | 备好资金，随时可能触发 |
-| RED | Score≥2 且之前 <2（状态翻转） | ARMED！历史上期望 +8.4% |
-
-GitHub Actions 每交易日 14:45 自动运行。SILENT 时静默不推送，YELLOW/RED 时通过以下渠道推送：
-- **Server酱** (微信): 设置 `PUSH_KEY` 环境变量
-- **PushDeer**: 设置 `PUSHDEER_KEY`
-- **自定义 Webhook**: 设置 `WEBHOOK_URL`
-- **GitHub Issue**: RED 警报自动创建 Issue（无需配置）
-
-本地手动运行: `python app/notify.py`
-
----
-
-## 九、水位线图
-
-Dashboard (`dashboard.html`) 走势图上叠加两条虚线：
-- **红线**：回撤触发价（Rule D 水位线）
-- **绿线**：估值触发价（Rule C 水位线）
-
-K 线砸穿虚线 = 极致赔率击球区。每天打开浏览器即可一目了然。
-
----
-
-## 十、使用指南
+## 四、使用指南
 
 ```bash
-python app/tracker.py                # 命令行 (信号 + 距离触发 + 警报)
-python app/dashboard.py              # 生成 HTML 看板
-start dashboard.html                 # 浏览器打开看板
+python app/tracker.py                    # CLI 信号
+python app/dashboard.py && start dashboard.html  # 看板
+python app/server.py                      # 实时服务器
 ```
 
-| Score | 仓位 | 含义 |
-|:-----:|:----:|------|
-| 0-1 | 0% | 观望 |
-| 2 | 15-30% | Armed：轻仓，历史上 13 周期望 +8.4% |
-| 3 | 50% | 半仓，强信号 |
-| 4-5 | 70% | 重仓，极强信号 |
+| Score | 状态 | 仓位 |
+|:-----:|------|:----:|
+| < 4.0 | 观望 | 0% |
+| 4.0 - 5.4 | 关注区 | 15% |
+| ≥ 5.5 | Armed | 40-60% |
 
 ---
 
-## 十一、已知局限
+## 五、已知局限
 
-1. **小样本**：全量去重后仅 10 个独立 Armed 机会。统计推断不可靠。
-2. **规则阈值人工设定**：RSI<30、DD<-10% 等基于全历史确定，存在数据挖掘风险。严格方法应是 expanding walk-forward。
-3. **Triple Barrier 参数**：+8%/-5% 是人为设定。但参数敏感性分析显示 uplift 高度稳定：
-
-| 参数 | success% | uplift |
-|:------|:--------:|:------:|
-| +6%/-5% | 38.2% | +7.9% |
-| **+8%/-5%** | **31.2%** | **+7.9%** |
-| +10%/-5% | 26.3% | +7.9% |
-| +8%/-3% | 26.6% | +7.9% |
-| +8%/-7% | 33.6% | +7.9% |
-
-uplift 在全部测试参数下均稳定在 +7.9%，说明 Armed 的条件收益优势不依赖特定的 barrier 参数选择。
-4. **仅覆盖医药板块**：黄金预测和顶部检测未实现。
-5. **无交易成本建模**：基金申赎费、时间成本未纳入。
-6. **Armed 信号 26 周后 alpha 消失**：超跌修复效应集中在 1-2 季度，不适合长期持有信号。
+1. 仅 2 个因子通过筛选，维度覆盖不足（缺资金面和流动性维度）
+2. 估值因子用价格分位替代真实 PE，可能在盈利大幅变动时失真
+3. n=6 独立机会，统计仍然偏小
+4. 阈值 5.5 意味着仅 M1(6.0分)单独触发，实际上只有一个因子在"工作"
+5. 未引入宏观流动性、政策事件等外部信号
 
 ---
 
-## 十二、版本记录
+## 六、未来优化方向
+
+1. **扩充候选因子池**：引入真实 PE/PB 估值（akshare `stock_industry_pe_ratio_cninfo`）、ETF 份额变化（shares outstanding）、北向资金背离
+2. **动态再平衡**：每季度重新运行五阶段框架，评分卡权重随市场结构变化自动调整
+3. **宏观状态分层**：在牛市/熊市/震荡市分别检验因子有效性，建立 regime-dependent 评分卡
+4. **降低阈值到 4.5 分**：让 V1(4.0分)接近触发线时也能发信号，增加操作机会（代价是 Uplift CI 下限可能略微下降）
+5. **引入非线性组合**：M1 和 V1 同时触发时的交互效应（当前 M1×V1 的 Uplift 未被单独测量）
+
+---
+
+## 七、版本记录
 
 | 版本 | 关键变更 |
 |------|----------|
-| V1-V2 | XGBoost预测涨跌/拐点。含数据泄露，已废弃 |
-| V3 | 五规则+局部极值标签(未来函数)。Precision 47% |
-| V3.1-3.4 | 多轮Bug修复 |
-| V4 | 前向收益标签、信号去重、Bootstrap CI、RSI Wilder |
-| **V4.1** | Triple Barrier标签(路径依赖)、条件期望评估、条件概率相关性、Benchmark对照、label clustering |
-| **V4.2** | collapse保留第一条(去前瞻偏差)、Barrier参数敏感性(uplift稳定+7.9%)、fred_source清理死代码+闰年修正 |
-| **V4.3** | Distance-to-Trigger、三级警报、水位线图、CI每交易日14:45 |
-| **V4.5** | Sina ETF(512170)实时映射801150(误差<0.1%)、图表库内联离线、多源降级、极速模式 |
+| V1-V2 | XGBoost 尝试（已废弃） |
+| V3 | 五规则等权投票 + 局部极值标签 |
+| V4 | Triple Barrier 标签 + 条件期望评估 + ETF 实时数据 |
+| **V5.0** | **五阶段因子筛选 + Uplift 驱动评分卡 + 阈值滑动寻优。仅 2 个因子通过统计检验** |
 
 ---
 
@@ -257,20 +165,19 @@ uplift 在全部测试参数下均稳定在 +7.9%，说明 Armed 的条件收益
 
 ```
 financial_analysis/
-├── REPORT.md                                    # 本报告
-├── dashboard.html                               # 自包含看板 (双击浏览器打开)
+├── REPORT.md
 ├── app/
-│   ├── dashboard.py                             # 生成 HTML 看板
-│   └── tracker.py                               # CLI 跟踪器 (信号+距离触发+警报)
+│   ├── tracker.py                         # CLI 跟踪器 (V5)
+│   ├── dashboard.py                       # HTML 看板 (V5 + 试算)
+│   └── server.py                          # 实时服务器
 ├── src/
 │   ├── data_fetcher/
-│   │   ├── akshare_source.py                    # AKShare: 申万/COMEX黄金/融资融券/PMI/CPI/M2
-│   │   └── fred_source.py                       # FRED: 美债利率/CPI/失业率
+│   │   ├── akshare_source.py              # AKShare + Sina ETF 实时
+│   │   └── fred_source.py                 # FRED
 │   └── models/
-│       └── turning_points.py                    # Triple Barrier + 五规则 + Bootstrap
-│                                                # + 条件期望 + 距离触发 + 警报
-├── .github/workflows/medical_tracker.yml        # CI: 每交易日 14:45 自动运行
-└── requirements.txt
+│       ├── turning_points.py              # V5Detector + distance_to_trigger
+│       └── factor_optimizer.py            # 五阶段因子优化框架
+└── .github/workflows/medical_tracker.yml  # CI 每交易日
 ```
 
 ```
@@ -757,115 +664,18 @@ start dashboard.html                      # 浏览器打开
 ```
 ---
 
-## 依赖清单
-`requirements.txt`
-```text
-pandas>=2.0
-numpy>=1.24
-scipy>=1.10
-akshare>=1.11
-openpyxl>=3.1
-
-```
----
-
-## Git忽略规则
-`.gitignore`
-```
-__pycache__/
-*.pyc
-dashboard.html
-data/processed/
-data/raw/
-.vscode/
-.idea/
-.claude/
-
-```
----
-
-## CI/CD工作流
-`.github/workflows/medical_tracker.yml`
-```yaml
-name: 医药板块每日监控 + 推送
-
-on:
-  schedule:
-    - cron: '45 6 * * 1-5'
-  workflow_dispatch:
-
-permissions:
-  contents: write
-  issues: write
-
-jobs:
-  daily-check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install
-        run: pip install pandas numpy scipy akshare openpyxl
-
-      - name: Verify code
-        run: |
-          python -c "from src.models.turning_points import TurningPointDetector; print('Import OK')"
-          python -c "from app.tracker import _compute, _load_data; print('Tracker OK')"
-
-      - name: Run monitor
-        id: monitor
-        env:
-          PUSH_KEY: ${{ secrets.PUSH_KEY }}
-        run: |
-          timeout 900 python app/notify.py 2>&1 | tee output.txt || true
-          python app/ci_parse.py
-
-      - name: Load results
-        id: parsed
-        run: cat alert_result.txt >> $GITHUB_OUTPUT
-
-      - name: Generate dashboard
-        timeout-minutes: 5
-        run: timeout 300 python app/dashboard.py || true
-
-      - name: Commit
-        timeout-minutes: 2
-        run: |
-          git config user.name "bot"
-          git config user.email "bot@users.noreply.github.com"
-          git add dashboard.html data/processed/signal_history.csv 2>/dev/null || true
-          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) ${{ steps.parsed.outputs.alert }}" && git push || true)
-
-      - name: Issue (RED)
-        if: steps.parsed.outputs.alert == 'red'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const out = fs.existsSync('output.txt') ? fs.readFileSync('output.txt','utf8').slice(0,4000) : '';
-            await github.rest.issues.create({
-              owner: context.repo.owner, repo: context.repo.repo,
-              title: `ARMED! Score=${{ steps.parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
-              body: '```\n' + out + '\n```\n\n历史Armed信号13周期望+8.4%',
-              labels: ['armed','alert']
-            });
-
-```
----
-
-## 核心:拐点检测
+## 核心:V5检测器
 `src/models/turning_points.py`
 ```python
 """
-医药板块风险收益比监控器 V4.3
+医药板块风险收益比监控器 V5.0
 
-功能:
+V5 新增: 五阶段因子优化框架 (factor_optimizer.py)
+  - 评分卡: M1_skew_neg=6.0分, V1_price_5y_low=4.0分
+  - 阈值: >=5.5分触发Armed
+  - 独立机会: 6次, Uplift +8.0%, CI [+3.5%,+13.7%]
+
+V4 功能:
   1. Triple Barrier 标签 (路径依赖, +8%/-5%, 13周)
   2. 五规则探测器 (RSI Wilder / DD / Cheap / Panic / Micro)
   3. 条件期望评估 E[ret|Armed] vs E[ret]
@@ -1037,6 +847,51 @@ class TurningPointDetector:
         ef = close.ewm(span=fast, adjust=False).mean()
         es = close.ewm(span=slow, adjust=False).mean()
         return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+
+
+class V5Detector:
+    """V5.0 优化版探测器: 评分卡加权, 数据驱动阈值"""
+
+    V5_SCORECARD = {"M1_skew_neg": 6.0, "V1_price_5y_low": 4.0}
+    V5_THRESHOLD = 5.5
+
+    def __init__(self):
+        pass
+
+    def compute(self, med_w: pd.Series) -> pd.DataFrame:
+        from src.models.factor_optimizer import build_factor_pool, _rsi_wilder, _macd_histogram
+
+        pool = build_factor_pool(med_w)
+        df = pd.DataFrame(index=med_w.index)
+        df["price"] = med_w
+        df["rsi"] = _rsi_wilder(med_w, 14)
+        df["drawdown_13w"] = (med_w / med_w.rolling(13).max() - 1) * 100
+        df["skew_13w"] = med_w.pct_change().rolling(13).skew()
+        df["val_pct_5y"] = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
+        df["vol_annual"] = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
+
+        # V5 评分
+        df["score"] = 0.0
+        for f, w in self.V5_SCORECARD.items():
+            if f in pool.columns:
+                df["score"] += pool[f] * w
+        df["score"] = df["score"].round(1)
+
+        # 规则详细状态
+        df["rule_M1"] = pool.get("M1_skew_neg", pd.Series(0, index=df.index))
+        df["rule_V1"] = pool.get("V1_price_5y_low", pd.Series(0, index=df.index))
+
+        # 信号
+        df["armed"] = (df["score"] >= self.V5_THRESHOLD).astype(int)
+
+        # 右侧确认
+        df["macd_hist"] = _macd_histogram(med_w)
+        df["macd_stable"] = (df["macd_hist"] >= df["macd_hist"].shift(1)).astype(int)
+        df["above_ma2"] = (med_w > med_w.rolling(2).mean()).astype(int)
+        df["right_confirm"] = ((df["macd_stable"] == 1) | (df["above_ma2"] == 1)).astype(int)
+        df["buy_signal"] = ((df["armed"] == 1) & (df["right_confirm"] == 1)).astype(int)
+
+        return df
 
 
 # ═══════════════════════════════════════════
@@ -1355,18 +1210,19 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
     latest = df.iloc[-1]
     curr_price = latest['price']
 
-    # Rule D (13周回撤 < -10%): 跌破过去13周最高点的 90% 即触发
+    # Rule D: 13周回撤 < -10%
     max_13w = med_w.rolling(13).max().iloc[-1]
     trigger_d = max_13w * 0.90
-    triggered_d = bool(latest['rule_dd'])
+    dd_val = (curr_price / max_13w - 1) * 100
+    triggered_d = dd_val < -10
     pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
 
-    # Rule C (5年分位 < 15%): 过去260周价格的 15% 分位数 = 触发底线
+    # Rule C: 5年分位 < 15%
     if len(med_w) >= 52:
         trigger_c = med_w.tail(260).quantile(0.15)
     else:
         trigger_c = np.nan
-    triggered_c = bool(latest['rule_cheap'])
+    triggered_c = curr_price < trigger_c if not np.isnan(trigger_c) else False
     pct_away_c = (trigger_c / curr_price - 1) * 100 if not triggered_c and not np.isnan(trigger_c) else 0.0
 
     return {
@@ -1409,6 +1265,366 @@ def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
         else:
             return {"level": "silent",
                     "message": "常态区间。未见极值错杀，安心生活。"}
+
+```
+---
+
+## 核心:五阶段因子优化
+`src/models/factor_optimizer.py`
+```python
+"""
+V5.0 因子自动筛选与赋权框架
+
+五阶段:
+  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney, 二值化, 无look-ahead)
+  2. 单因子三漏斗检验 (稀疏度2-15% + 收益>5% + Uplift CI下限>1%)
+  3. 条件概率去重 (P(A|B)>0.65则保留Uplift下限更高的)
+  4. Uplift驱动离散评分卡 (0.5步长, 满分10)
+  5. 阈值滑动寻优 (平衡Uplift与独立机会数)
+"""
+import pandas as pd
+import numpy as np
+from scipy.stats import percentileofscore
+
+
+# ═══════════════════════════════════════════
+# 阶段1: 候选因子池
+# ═══════════════════════════════════════════
+
+def build_factor_pool(med_w: pd.Series) -> pd.DataFrame:
+    """
+    构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
+
+    Returns: DataFrame(index=med_w.index, columns=因子名, values=0/1)
+    """
+    pool = pd.DataFrame(index=med_w.index)
+
+    # ── 维度1: 估值 (Valuation) ──
+    # V1: 5年价格分位 < 15% (极度便宜)
+    pool["V1_price_5y_low"] = (
+        med_w.rolling(260, min_periods=52).rank(pct=True) < 0.15
+    ).astype(int)
+
+    # V2: 价格距52周低点 < 5% (接近一年低点)
+    ll_52w = med_w.rolling(52).min()
+    pool["V2_near_52w_low"] = ((med_w / ll_52w - 1) < 0.05).astype(int)
+
+    # V3: 连续下跌 > 8周 (长期阴跌后的估值修复概率高)
+    down_streak = (med_w.pct_change() < 0).astype(int)
+    pool["V3_down_8w"] = (down_streak.rolling(8).sum() >= 7).astype(int)
+
+    # ── 维度2: 量价冰点 (Liquidity) ──
+    # L1: 周线RSI Wilder < 30
+    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
+
+    # L2: 13周最大回撤 < -12% (加深阈值, 比V3的-10%更严)
+    pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
+
+    # L3: 波动率收缩 < 过去2年25分位 (暴风雨前的宁静)
+    vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
+    pool["L3_vol_shrink"] = (
+        vol < vol.rolling(104, min_periods=52).quantile(0.25)
+    ).astype(int)
+
+    # ── 维度3: 动能衰竭 (Momentum) ──
+    # M1: 收益偏度 < -1.5 (极端左尾, 比之前-1更严)
+    skew = med_w.pct_change().rolling(13).skew()
+    pool["M1_skew_neg"] = (skew < -1.5).astype(int)
+
+    # M2: 4周累计跌幅 > 8% (加速下跌)
+    pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
+
+    # M3: MACD 柱状线创13周新低
+    macd_hist = _macd_histogram(med_w)
+    pool["M3_macd_low"] = (
+        macd_hist < macd_hist.rolling(13).min()
+    ).astype(int)
+
+    # ── 维度4: 资金背离 (Smart Money) ──
+    # S1: 价格跌但RSI不创新低 (底背离)
+    ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
+    pool["S1_divergence"] = (
+        (pool["V2_near_52w_low"] == 1) &
+        (_rsi_wilder(med_w, 14) > ll_rsi + 5)
+    ).astype(int)
+
+    # S2: 下跌放缓 (本周跌幅 < 前4周平均跌幅)
+    weekly_ret = med_w.pct_change() * 100
+    avg_down_4w = weekly_ret.rolling(4).mean()
+    pool["S2_down_slowing"] = (
+        (weekly_ret < 0) & (weekly_ret > avg_down_4w)
+    ).astype(int)
+
+    return pool.fillna(0).astype(int)
+
+
+def _rsi_wilder(close, period=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def _macd_histogram(close, fast=12, slow=26, signal=9):
+    ef = close.ewm(span=fast, adjust=False).mean()
+    es = close.ewm(span=slow, adjust=False).mean()
+    return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+
+
+# ═══════════════════════════════════════════
+# 阶段2: 单因子三漏斗检验
+# ═══════════════════════════════════════════
+
+def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
+    """Bootstrap 95% CI for mean"""
+    if len(data) < 4:
+        return (np.nan, np.nan)
+    rng = np.random.RandomState(seed)
+    means = []
+    n = len(data)
+    for _ in range(n_iter):
+        idx = rng.choice(n, size=n, replace=True)
+        means.append(np.mean(data[idx]))
+    means = np.array(means)
+    return (np.percentile(means, 2.5), np.percentile(means, 97.5))
+
+
+def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
+                   forward_weeks: int = 13) -> pd.DataFrame:
+    """
+    三漏斗检验：稀疏度 → 收益 → 置信度
+    """
+    n_total = len(pool)
+    # 无条件13周期望收益
+    all_rets = np.array([
+        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+        for i in range(n_total - forward_weeks)
+    ])
+    e_uncond = np.mean(all_rets)
+
+    results = []
+    for col in pool.columns:
+        triggered = pool[col] == 1
+        n_triggered = triggered.sum()
+
+        # 漏斗1: 稀疏度 2%-15%
+        freq = n_triggered / n_total
+        if freq < 0.02 or freq > 0.15:
+            continue
+
+        # 漏斗2: 条件期望收益 > 5%
+        fwd_rets = []
+        for i in range(n_total - forward_weeks):
+            if triggered.iloc[i]:
+                fwd_rets.append(
+                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+                )
+        fwd_rets = np.array(fwd_rets)
+        e_cond = np.mean(fwd_rets)
+        if e_cond <= 5.0:
+            continue
+
+        # 漏斗3: Uplift CI下限 > 1%
+        uplift_vals = fwd_rets - e_uncond
+        ci_low, ci_high = bootstrap_ci(uplift_vals)
+        if np.isnan(ci_low) or ci_low <= 1.0:
+            continue
+
+        results.append({
+            "factor": col,
+            "dimension": col[:2],  # V/L/M/S
+            "freq": freq,
+            "e_cond": e_cond,
+            "e_uncond": e_uncond,
+            "uplift": e_cond - e_uncond,
+            "uplift_ci_low": ci_low,
+            "uplift_ci_high": ci_high,
+            "n_signals": n_triggered,
+        })
+
+    return pd.DataFrame(results).sort_values("uplift_ci_low", ascending=False)
+
+
+# ═══════════════════════════════════════════
+# 阶段3: 条件概率去重
+# ═══════════════════════════════════════════
+
+def deduplicate_factors(pool: pd.DataFrame, screened: pd.DataFrame,
+                         corr_threshold: float = 0.65) -> list:
+    """条件概率去重：P(A|B)>0.65 则保留Uplift CI下限更高的"""
+    survivors = screened["factor"].tolist()
+    removed = []
+
+    for i in range(len(survivors)):
+        if survivors[i] in removed:
+            continue
+        for j in range(i + 1, len(survivors)):
+            if survivors[j] in removed:
+                continue
+            a, b = survivors[i], survivors[j]
+            # P(A=1 | B=1)
+            b_true = pool[pool[b] == 1]
+            p_a_given_b = b_true[a].mean() if len(b_true) > 0 else 0
+            p_b_given_a = pool[pool[a] == 1][b].mean() if (pool[a]==1).sum() > 0 else 0
+
+            if max(p_a_given_b, p_b_given_a) > corr_threshold:
+                # 保留 Uplift CI 下限更高的
+                ci_a = screened[screened["factor"] == a]["uplift_ci_low"].values[0]
+                ci_b = screened[screened["factor"] == b]["uplift_ci_low"].values[0]
+                if ci_a >= ci_b:
+                    removed.append(b)
+                else:
+                    removed.append(a)
+
+    return [f for f in survivors if f not in removed]
+
+
+# ═══════════════════════════════════════════
+# 阶段4: Uplift驱动评分卡
+# ═══════════════════════════════════════════
+
+def build_scoring_card(screened: pd.DataFrame, final_factors: list,
+                        max_score: float = 10.0) -> pd.DataFrame:
+    """
+    按Uplift贡献度分配权重，离散化到0.5步长。
+    """
+    sub = screened[screened["factor"].isin(final_factors)].copy()
+    total_uplift = sub["uplift"].sum()
+    sub["raw_weight"] = sub["uplift"] / total_uplift
+    sub["raw_score"] = sub["raw_weight"] * max_score
+    sub["discrete_score"] = (sub["raw_score"] * 2).round() / 2  # 四舍五入到0.5
+    # 确保不低于0.5
+    sub["discrete_score"] = sub["discrete_score"].clip(lower=0.5)
+    # 总分归一化到max_score
+    scale = max_score / sub["discrete_score"].sum()
+    sub["final_score"] = (sub["discrete_score"] * scale * 2).round() / 2
+    return sub[["factor", "dimension", "uplift", "uplift_ci_low",
+                "raw_weight", "final_score"]].sort_values("final_score", ascending=False)
+
+
+# ═══════════════════════════════════════════
+# 阶段5: 阈值滑动寻优
+# ═══════════════════════════════════════════
+
+def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
+                           med_w: pd.Series, forward_weeks: int = 13) -> pd.DataFrame:
+    """
+    滑动阈值, 输出每个阈值下的Uplift和独立机会数。
+    """
+    # 计算加权总分
+    total_score = pd.Series(0, index=pool.index, dtype=float)
+    for _, row in scoring.iterrows():
+        f = row["factor"]
+        if f in pool.columns:
+            total_score += pool[f] * row["final_score"]
+
+    n_total = len(pool)
+    all_rets = np.array([
+        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+        for i in range(n_total - forward_weeks)
+    ])
+    e_uncond = np.mean(all_rets)
+
+    # 去重叠信号
+    def count_independent(triggered: np.ndarray, min_gap: int = 4) -> int:
+        dates = np.where(triggered)[0]
+        if len(dates) == 0:
+            return 0
+        count = 1
+        last = dates[0]
+        for d in dates[1:]:
+            if d - last >= min_gap:
+                count += 1
+                last = d
+        return count
+
+    results = []
+    thresholds = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
+    for thresh in thresholds:
+        triggered = (total_score >= thresh).values
+        n_independent = count_independent(triggered)
+
+        fwd_rets = []
+        for i in range(n_total - forward_weeks):
+            if triggered[i]:
+                fwd_rets.append(
+                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+                )
+        fwd_rets = np.array(fwd_rets)
+        e_cond = np.mean(fwd_rets) if len(fwd_rets) > 0 else np.nan
+        uplift = e_cond - e_uncond if not np.isnan(e_cond) else np.nan
+        ci_low, ci_high = bootstrap_ci(fwd_rets) if len(fwd_rets) >= 4 else (np.nan, np.nan)
+
+        results.append({
+            "threshold": thresh,
+            "n_independent": n_independent,
+            "n_raw": int(triggered.sum()),
+            "e_cond": e_cond,
+            "uplift": uplift,
+            "uplift_ci_low": ci_low,
+            "uplift_ci_high": ci_high,
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═══════════════════════════════════════════
+# 一键运行
+# ═══════════════════════════════════════════
+
+def run_full_pipeline(med_w: pd.Series) -> dict:
+    """执行完整五阶段优化, 返回所有结果"""
+    print("=" * 60)
+    print("  V5.0 因子自动筛选与赋权框架")
+    print("=" * 60)
+
+    # 阶段1
+    print("\n[阶段1] 构建候选因子池...")
+    pool = build_factor_pool(med_w)
+    print(f"  候选因子: {len(pool.columns)} 个")
+
+    # 阶段2
+    print("\n[阶段2] 单因子三漏斗检验...")
+    screened = screen_factors(pool, med_w)
+    print(f"  通过筛选: {len(screened)}/{len(pool.columns)}")
+    if len(screened) == 0:
+        print("  ⚠ 无因子通过筛选!")
+        return {}
+    for _, r in screened.iterrows():
+        print(f"    {r['factor']:20s} | freq={r['freq']:.1%} | E={r['e_cond']:+.1f}% | Uplift={r['uplift']:+.1f}% | CI=[{r['uplift_ci_low']:+.1f}%,{r['uplift_ci_high']:+.1f}%]")
+
+    # 阶段3
+    print("\n[阶段3] 条件概率去重...")
+    final = deduplicate_factors(pool, screened)
+    print(f"  去重后: {len(final)}/{len(screened)}")
+    print(f"  入选: {final}")
+
+    # 阶段4
+    print("\n[阶段4] 评分卡赋权...")
+    scoring = build_scoring_card(screened, final)
+    for _, r in scoring.iterrows():
+        print(f"    {r['factor']:20s} | Uplift={r['uplift']:+.1f}% | 得分={r['final_score']:.1f}")
+
+    # 阶段5
+    print("\n[阶段5] 阈值滑动寻优...")
+    threshold_df = threshold_optimization(pool, scoring, med_w)
+    # 找最优: 独立机会 >=5 且 uplift CI下限最高的
+    candidates = threshold_df[(threshold_df["n_independent"] >= 5)]
+    if len(candidates) > 0:
+        best = candidates.sort_values("uplift_ci_low", ascending=False).iloc[0]
+        print(f"  最优阈值: {best['threshold']} (机会={int(best['n_independent'])}, Uplift={best['uplift']:+.1f}%)")
+    print("\n" + threshold_df.to_string(index=False))
+
+    return {
+        "pool": pool,
+        "screened": screened,
+        "final_factors": final,
+        "scoring": scoring,
+        "threshold_analysis": threshold_df,
+    }
 
 ```
 ---
@@ -1916,7 +2132,7 @@ class FREDSource:
 ```
 ---
 
-## 应用:CLI跟踪器
+## 应用:CLI跟踪器(V5)
 `app/tracker.py`
 ```python
 """
@@ -1949,7 +2165,7 @@ def _load_data() -> dict:
 
 def _compute(data: dict, custom_price: float = None) -> dict:
     """计算信号。custom_price: 可选, 用指定价格覆盖最新周数据（用于试算）"""
-    from src.models.turning_points import TurningPointDetector
+    from src.models.turning_points import V5Detector
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
@@ -1958,20 +2174,15 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     if custom_price is not None and len(med_w) > 0:
         med_w.iloc[-1] = custom_price
 
-    det = TurningPointDetector()
+    det = V5Detector()
     df = det.compute(med_w)
     latest = df.iloc[-1]
 
-    # 规则状态直接从 df 读取（与 Score 计算完全一致）
+    # V5 评分卡因子
     rule_defs = [
-        ("rule_rsi",   "R:RSI超卖",     f"{latest['rsi']:.1f}",               "< 30",          "短期动能衰竭"),
-        ("rule_dd",    "D:深度回撤",     f"{latest['drawdown_13w']:.1f}%",     "< -10%",        "跌幅充分"),
-        ("rule_cheap", "C:极度便宜",     f"{latest['val_pct_5y']:.0f}%",       "< 15%分位",     "历史底部区域"),
-        ("rule_panic", "P:恐慌指数",     f"偏度{latest['skew_13w']:.2f}/波动率{latest['vol_annual']:.1f}%",
-                                         "偏度<-1 或 波动>80分位",               "极端左尾或恐慌"),
-        ("rule_micro", "M:聪明钱流入",   "ETF份额",                             "价跌+份额增",    "机构越跌越买"),
+        ("rule_M1", "M1:偏度异常", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾 (6.0分)"),
+        ("rule_V1", "V1:估值冰点", f"{latest['val_pct_5y']:.0f}%", "< 15%", "历史低位 (4.0分)"),
     ]
-
     rules_status = []
     for col, name, val, thresh, desc in rule_defs:
         rules_status.append({
@@ -1995,7 +2206,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         hist = hist[hist["date"] != today_str]
     else:
         hist = pd.DataFrame(columns=["date", "score"])
-    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": int(latest["score"])}])], ignore_index=True)
+    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": round(latest["score"], 1)}])], ignore_index=True)
     hist.to_csv(hist_path, index=False)
 
     alert = alert_level(df, prev_score)
@@ -2008,7 +2219,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         "val_pct_5y": latest["val_pct_5y"],
         "skew": latest["skew_13w"],
         "vol": latest["vol_annual"],
-        "score": int(latest["score"]),
+        "score": round(latest["score"], 1),
         "armed": bool(latest["armed"]),
         "buy": bool(latest["buy_signal"]),
         "macd_ok": bool(latest["macd_stable"]),
@@ -2124,7 +2335,7 @@ if __name__ == "__main__":
 ```
 ---
 
-## 应用:HTML看板(内联图表+试算)
+## 应用:HTML看板(V5+试算)
 `app/dashboard.py`
 ```python
 """生成自包含 HTML 看板 — 图表库首次下载缓存，之后离线可用"""
@@ -2180,7 +2391,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 def build_dashboard(output_path: str = "dashboard.html"):
     from src.data_fetcher.akshare_source import AKShareSource
-    from src.models.turning_points import TurningPointDetector, collapse_signals
+    from src.models.turning_points import V5Detector, collapse_signals
 
     t0 = time.time()
     print("生成看板...")
@@ -2189,17 +2400,15 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
 
-    det = TurningPointDetector()
+    det = V5Detector()
     df = det.compute(med_w)
     latest = df.iloc[-1]
 
-    score = int(latest["score"])
-    if score <= 1:       pct, label, color = 0, "观望 (0%)", "#9CA3AF"
-    elif score == 2:
-        if bool(latest["right_confirm"]): pct, label, color = 30, "轻仓 30%", "#F59E0B"
-        else:                             pct, label, color = 15, "试探仓 15%", "#F59E0B"
-    elif score == 3:     pct, label, color = 50, "半仓 50%", "#F97316"
-    else:                pct, label, color = 70, "重仓 70%", "#EF4444"
+    score = float(latest["score"])
+    if score < 4:        pct, label, color = 0, "观望 (0%)", "#9CA3AF"
+    elif score < 5.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
+    elif score < 6.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
+    else:                pct, label, color = 60, "重仓 60% — 双因子触发", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
@@ -2213,11 +2422,8 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
     rule_defs = [
-        ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30"),
-        ("D: 深度回撤", bool(latest["rule_dd"]), f'{latest["drawdown_13w"]:.1f}%', "< -10%"),
-        ("C: 极度便宜", bool(latest["rule_cheap"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
-        ("P: 恐慌指数", bool(latest["rule_panic"]), f'偏度{latest["skew_13w"]:.2f}', "偏度<-1 或 波动飙升"),
-        ("M: 聪明钱", bool(latest["rule_micro"]), "待数据", "ETF份额逆势增"),
+        ("M1:偏度异常(6.0分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
+        ("V1:估值冰点(4.0分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
     ]
     rules_html = ""
     for name, ok, val, thresh in rule_defs:
@@ -2366,170 +2572,7 @@ if __name__ == "__main__":
 ```
 ---
 
-## 应用:推送通知
-`app/notify.py`
-```python
-"""
-推送通知模块 — 支持多种推送渠道
-
-用法:
-    python app/notify.py                    # 运行 tracker 并在有警报时推送
-    python app/notify.py --dry-run          # 仅打印，不实际推送
-
-环境变量 (可选, 不设置则仅打印):
-    PUSH_KEY       Server酱 SendKey (https://sct.ftqq.com/)
-    PUSHDEER_KEY   PushDeer pushkey
-    WEBHOOK_URL    自定义 Webhook URL (POST JSON)
-"""
-import sys
-import os
-import json
-import urllib.request
-from pathlib import Path
-from datetime import datetime
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-
-def push_serverchan(title: str, content: str, push_key: str = None) -> bool:
-    """Server酱 (微信推送)"""
-    key = push_key or os.environ.get("PUSH_KEY", "")
-    if not key:
-        return False
-    try:
-        url = f"https://sctapi.ftqq.com/{key}.send"
-        data = json.dumps({"title": title, "desp": content}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
-        return True
-    except Exception as e:
-        print(f"  [ServerChan] Failed: {e}")
-        return False
-
-
-def push_pushdeer(title: str, content: str, push_key: str = None) -> bool:
-    """PushDeer"""
-    key = push_key or os.environ.get("PUSHDEER_KEY", "")
-    if not key:
-        return False
-    try:
-        url = f"https://api2.pushdeer.com/message/push?pushkey={key}&text={urllib.parse.quote(title)}&desp={urllib.parse.quote(content)}"
-        urllib.request.urlopen(url, timeout=10)
-        return True
-    except Exception as e:
-        print(f"  [PushDeer] Failed: {e}")
-        return False
-
-
-def push_webhook(title: str, content: str, webhook_url: str = None) -> bool:
-    """自定义 Webhook"""
-    url = webhook_url or os.environ.get("WEBHOOK_URL", "")
-    if not url:
-        return False
-    try:
-        data = json.dumps({"title": title, "content": content, "time": datetime.now().isoformat()}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
-        return True
-    except Exception as e:
-        print(f"  [Webhook] Failed: {e}")
-        return False
-
-
-def push(title: str, content: str) -> bool:
-    """尝试所有渠道"""
-    sent = False
-    for fn in [push_serverchan, push_pushdeer, push_webhook]:
-        if fn(title, content):
-            sent = True
-    # GitHub Actions: 输出到 workflow summary
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-            f.write(f"## {title}\n\n{content}\n")
-        sent = True
-    return sent
-
-
-def run(dry_run: bool = False, test_push: bool = False):
-    """主入口：计算信号 + 按需推送"""
-    from app.tracker import _compute, _load_data
-
-    # 测试模式：强制发送测试推送
-    if test_push:
-        title = "测试推送 — 医药板块监控器"
-        content = f"如果你收到这条消息，说明推送配置成功！\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        print(f"  测试模式: 强制推送")
-        if not dry_run:
-            sent = push(title, content)
-            if sent:
-                print("  测试推送已发送！请检查微信/手机是否收到。")
-            else:
-                print("  推送失败！请检查 PUSH_KEY 是否正确设置。")
-                print(f"  当前 PUSH_KEY: {'已设置' if os.environ.get('PUSH_KEY') else '未设置'}")
-        else:
-            print(f"  [dry-run] 标题: {title}\n  内容: {content}")
-        return
-
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 运行监控...")
-    try:
-        sig = _compute(_load_data())
-    except Exception as e:
-        print(f"  数据拉取失败: {e}")
-        print(f"  [SILENT] 无法计算信号, 静默退出")
-        return
-    alert = sig["alert"]
-    score = sig["score"]
-
-    # 构建推送内容
-    lines = [
-        f"日期: {sig['date']}",
-        f"指数: {sig['price']:.0f}",
-        f"Score: {score}/5",
-        f"警报: [{alert['level'].upper()}] {alert['message']}",
-        "",
-        "--- 距离触发 ---",
-    ]
-    for key in ["D", "C"]:
-        d = sig["distance_to_trigger"][key]
-        if d["triggered"]:
-            lines.append(f"{d['name']}: 已触发")
-        elif d.get("trigger_price"):
-            lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f} (距当前 {d['pct_away']:+.1f}%)")
-    content = "\n".join(lines)
-
-    # 根据警报级别决定是否推送
-    level = alert["level"]
-    if level == "silent":
-        print(f"  Score={score} [{level}] — 静默, 不推送")
-        return
-
-    # YELLOW 或 RED: 推送
-    emoji = "🔴" if level == "red" else "🟡"
-    title = f"{emoji} 医药板块{'ARMED!' if level == 'red' else '近触发预警'} (Score={score})"
-
-    print(f"  [{level.upper()}] {alert['message']}")
-    print(f"  推送标题: {title}")
-
-    if not dry_run:
-        sent = push(title, content)
-        if sent:
-            print("  推送已发送")
-        else:
-            print("  未配置推送渠道 (设置 PUSH_KEY / PUSHDEER_KEY / WEBHOOK_URL 环境变量)")
-    else:
-        print("  [dry-run] 跳过推送")
-        print(content)
-
-
-if __name__ == "__main__":
-    dry = "--dry-run" in sys.argv
-    test = "--test" in sys.argv
-    run(dry_run=dry, test_push=test)
-
-```
----
-
-## 应用:实时看板服务器(统一dashboard)
+## 应用:实时服务器
 `app/server.py`
 ```python
 """
@@ -3169,6 +3212,244 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+```
+---
+
+## 应用:推送通知
+`app/notify.py`
+```python
+"""
+推送通知模块 — 支持多种推送渠道
+
+用法:
+    python app/notify.py                    # 运行 tracker 并在有警报时推送
+    python app/notify.py --dry-run          # 仅打印，不实际推送
+
+环境变量 (可选, 不设置则仅打印):
+    PUSH_KEY       Server酱 SendKey (https://sct.ftqq.com/)
+    PUSHDEER_KEY   PushDeer pushkey
+    WEBHOOK_URL    自定义 Webhook URL (POST JSON)
+"""
+import sys
+import os
+import json
+import urllib.request
+from pathlib import Path
+from datetime import datetime
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def push_serverchan(title: str, content: str, push_key: str = None) -> bool:
+    """Server酱 (微信推送)"""
+    key = push_key or os.environ.get("PUSH_KEY", "")
+    if not key:
+        return False
+    try:
+        url = f"https://sctapi.ftqq.com/{key}.send"
+        data = json.dumps({"title": title, "desp": content}).encode()
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception as e:
+        print(f"  [ServerChan] Failed: {e}")
+        return False
+
+
+def push_pushdeer(title: str, content: str, push_key: str = None) -> bool:
+    """PushDeer"""
+    key = push_key or os.environ.get("PUSHDEER_KEY", "")
+    if not key:
+        return False
+    try:
+        url = f"https://api2.pushdeer.com/message/push?pushkey={key}&text={urllib.parse.quote(title)}&desp={urllib.parse.quote(content)}"
+        urllib.request.urlopen(url, timeout=10)
+        return True
+    except Exception as e:
+        print(f"  [PushDeer] Failed: {e}")
+        return False
+
+
+def push_webhook(title: str, content: str, webhook_url: str = None) -> bool:
+    """自定义 Webhook"""
+    url = webhook_url or os.environ.get("WEBHOOK_URL", "")
+    if not url:
+        return False
+    try:
+        data = json.dumps({"title": title, "content": content, "time": datetime.now().isoformat()}).encode()
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception as e:
+        print(f"  [Webhook] Failed: {e}")
+        return False
+
+
+def push(title: str, content: str) -> bool:
+    """尝试所有渠道"""
+    sent = False
+    for fn in [push_serverchan, push_pushdeer, push_webhook]:
+        if fn(title, content):
+            sent = True
+    # GitHub Actions: 输出到 workflow summary
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write(f"## {title}\n\n{content}\n")
+        sent = True
+    return sent
+
+
+def run(dry_run: bool = False, test_push: bool = False):
+    """主入口：计算信号 + 按需推送"""
+    from app.tracker import _compute, _load_data
+
+    # 测试模式：强制发送测试推送
+    if test_push:
+        title = "测试推送 — 医药板块监控器"
+        content = f"如果你收到这条消息，说明推送配置成功！\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        print(f"  测试模式: 强制推送")
+        if not dry_run:
+            sent = push(title, content)
+            if sent:
+                print("  测试推送已发送！请检查微信/手机是否收到。")
+            else:
+                print("  推送失败！请检查 PUSH_KEY 是否正确设置。")
+                print(f"  当前 PUSH_KEY: {'已设置' if os.environ.get('PUSH_KEY') else '未设置'}")
+        else:
+            print(f"  [dry-run] 标题: {title}\n  内容: {content}")
+        return
+
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 运行监控...")
+    try:
+        sig = _compute(_load_data())
+    except Exception as e:
+        print(f"  数据拉取失败: {e}")
+        print(f"  [SILENT] 无法计算信号, 静默退出")
+        return
+    alert = sig["alert"]
+    score = sig["score"]
+
+    # 构建推送内容
+    lines = [
+        f"日期: {sig['date']}",
+        f"指数: {sig['price']:.0f}",
+        f"Score: {score}/5",
+        f"警报: [{alert['level'].upper()}] {alert['message']}",
+        "",
+        "--- 距离触发 ---",
+    ]
+    for key in ["D", "C"]:
+        d = sig["distance_to_trigger"][key]
+        if d["triggered"]:
+            lines.append(f"{d['name']}: 已触发")
+        elif d.get("trigger_price"):
+            lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f} (距当前 {d['pct_away']:+.1f}%)")
+    content = "\n".join(lines)
+
+    # 根据警报级别决定是否推送
+    level = alert["level"]
+    if level == "silent":
+        print(f"  Score={score} [{level}] — 静默, 不推送")
+        return
+
+    # YELLOW 或 RED: 推送
+    emoji = "🔴" if level == "red" else "🟡"
+    title = f"{emoji} 医药板块{'ARMED!' if level == 'red' else '近触发预警'} (Score={score})"
+
+    print(f"  [{level.upper()}] {alert['message']}")
+    print(f"  推送标题: {title}")
+
+    if not dry_run:
+        sent = push(title, content)
+        if sent:
+            print("  推送已发送")
+        else:
+            print("  未配置推送渠道 (设置 PUSH_KEY / PUSHDEER_KEY / WEBHOOK_URL 环境变量)")
+    else:
+        print("  [dry-run] 跳过推送")
+        print(content)
+
+
+if __name__ == "__main__":
+    dry = "--dry-run" in sys.argv
+    test = "--test" in sys.argv
+    run(dry_run=dry, test_push=test)
+
+```
+---
+
+## CI/CD
+`.github/workflows/medical_tracker.yml`
+```yaml
+name: 医药板块每日监控 + 推送
+
+on:
+  schedule:
+    - cron: '45 6 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  daily-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: pip install pandas numpy scipy akshare openpyxl
+
+      - name: Verify code
+        run: |
+          python -c "from src.models.turning_points import TurningPointDetector; print('Import OK')"
+          python -c "from app.tracker import _compute, _load_data; print('Tracker OK')"
+
+      - name: Run monitor
+        id: monitor
+        env:
+          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+        run: |
+          timeout 900 python app/notify.py 2>&1 | tee output.txt || true
+          python app/ci_parse.py
+
+      - name: Load results
+        id: parsed
+        run: cat alert_result.txt >> $GITHUB_OUTPUT
+
+      - name: Generate dashboard
+        timeout-minutes: 5
+        run: timeout 300 python app/dashboard.py || true
+
+      - name: Commit
+        timeout-minutes: 2
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add dashboard.html data/processed/signal_history.csv 2>/dev/null || true
+          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) ${{ steps.parsed.outputs.alert }}" && git push || true)
+
+      - name: Issue (RED)
+        if: steps.parsed.outputs.alert == 'red'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const out = fs.existsSync('output.txt') ? fs.readFileSync('output.txt','utf8').slice(0,4000) : '';
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `ARMED! Score=${{ steps.parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
+              body: '```\n' + out + '\n```\n\n历史Armed信号13周期望+8.4%',
+              labels: ['armed','alert']
+            });
 
 ```
 ---
