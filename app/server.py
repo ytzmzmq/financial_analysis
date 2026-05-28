@@ -164,6 +164,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="header-meta">
       数据截止 <b id="h-date">—</b><br>
       更新时间 <b id="h-updated">—</b>
+      <div style="margin-top:10px; display:flex; align-items:center; gap:8px; justify-content:flex-end">
+        <input type="number" id="custom-price" placeholder="试算点位(如 7430)"
+               style="padding:6px; border-radius:6px; border:1px solid #374151; background:#1f2937; color:#e2e8f0; width:160px; font-size:12px;">
+        <button onclick="load()" style="padding:6px 12px; background:#38bdf8; color:#000; border:none; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">刷新试算</button>
+      </div>
     </div>
   </div>
 
@@ -242,7 +247,10 @@ async function load() {
   document.getElementById('app').style.display = 'none';
 
   try {
-    const r = await fetch('/api/signal');
+    const cpEl = document.getElementById('custom-price');
+    const cp = cpEl ? cpEl.value : '';
+    const url = cp ? '/api/signal?price=' + cp : '/api/signal';
+    const r = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
     const d = await r.json();
     render(d);

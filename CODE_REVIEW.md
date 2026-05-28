@@ -1390,15 +1390,39 @@ class AKShareSource:
     # ── 申万医药生物指数 ──
     def fetch_sw_medical(self, start_date: str = "20180101",
                          end_date: str | None = None) -> pd.DataFrame:
-        """获取申万医药生物指数(801150)日线"""
+        """获取申万医药生物指数(801150)日线，用 ETF 代理映射盘中实时价格"""
         if ak is None:
             raise ImportError("akshare not installed")
+
+        # 1. 获取历史日线
         df = ak.index_hist_sw(symbol="801150", period="day")
         df = df.rename(columns={
             "日期": "date", "收盘": "close", "开盘": "open",
             "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+
+        # 2. 用 512290(生物医药ETF) 盘中涨跌幅推算指数实时点位
+        try:
+            spot_df = ak.stock_zh_a_spot_em()
+            etf = spot_df[spot_df["代码"] == "512290"]
+            if not etf.empty:
+                pct_change = float(etf["涨跌幅"].iloc[0]) / 100.0
+                last_close = df.iloc[-1]["close"]
+                realtime_price = last_close * (1 + pct_change)
+
+                today = pd.Timestamp.today().normalize()
+                if df.iloc[-1]["date"] < today:
+                    new_row = {"date": today, "close": realtime_price, "open": realtime_price,
+                               "high": realtime_price, "low": realtime_price,
+                               "volume": 0, "amount": 0}
+                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                else:
+                    df.loc[df.index[-1], "close"] = realtime_price
+                print(f"[AKShare] ETF代理: 512290涨跌{pct_change*100:+.2f}% → 指数估算 {realtime_price:.2f}")
+        except Exception:
+            pass  # 周末休市或网络不佳，退回历史数据
+
         if end_date is None:
             end_date = pd.Timestamp.now().strftime("%Y%m%d")
         mask = (df["date"] >= pd.Timestamp(start_date)) & (df["date"] <= pd.Timestamp(end_date))
@@ -2180,14 +2204,16 @@ def _load_data() -> dict:
     return AKShareSource().fetch_all("2018-01-01")
 
 
-def _compute(data: dict) -> dict:
-    """计算信号并返回结构化结果。所有规则状态直接从 df 中读取，杜绝硬编码。"""
+def _compute(data: dict, custom_price: float = None) -> dict:
+    """计算信号。custom_price: 可选, 用指定价格覆盖最新周数据（用于试算）"""
     from src.models.turning_points import TurningPointDetector
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
-    # 截断未来日期：resample 会把本周数据标为周五，若周五未到则剔除
-    med_w = med_w[med_w.index.date <= pd.Timestamp.today().date()]
+
+    # 用 custom_price 覆盖最新一周的收盘价（"跌到XX会触发"的试算功能）
+    if custom_price is not None and len(med_w) > 0:
+        med_w.iloc[-1] = custom_price
 
     det = TurningPointDetector()
     df = det.compute(med_w)
@@ -2404,7 +2430,6 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data = AKShareSource().fetch_all("2018-01-01")
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
-    med_w = med_w[med_w.index.date <= pd.Timestamp.today().date()]
 
     det = TurningPointDetector()
     df = det.compute(med_w)
@@ -2838,7 +2863,7 @@ print(f"alert={alert} score={score}")
 ---
 
 ## 应用:实时看板服务器
-`server.py`
+`app/server.py`
 ```python
 """
 实时看板服务器 — 每次打开/刷新页面自动拉取最新数据
@@ -3177,10 +3202,22 @@ function render(d) {
   });
 
   const line = chart.addLineSeries({color:'#38bdf8', lineWidth:2});
-  const prices = d.chart.map(w => ({time:w.time, value:w.value}));
+
+  // 去重 + 排序 (防止重复时间轴导致图表崩溃)
+  const uniqueData = [];
+  const seen = new Set();
+  d.chart.forEach(w => {
+    if (!seen.has(w.time) && w.value != null && !isNaN(w.value)) {
+      seen.add(w.time);
+      uniqueData.push(w);
+    }
+  });
+  uniqueData.sort((a,b) => a.time.localeCompare(b.time));
+
+  const prices = uniqueData.map(w => ({time:w.time, value:w.value}));
   line.setData(prices);
   line.setMarkers(
-    d.chart.filter(w => w.armed).map(w => ({
+    uniqueData.filter(w => w.armed).map(w => ({
       time:w.time, position:'belowBar', color:'#fbbf24',
       shape:'arrowUp', text: String(w.score)
     }))
@@ -3230,13 +3267,19 @@ load();
 # API: 实时计算信号并序列化为 JSON
 # ═══════════════════════════════════════════════════════════════
 
-def _compute_and_serialize() -> dict:
+def _compute_and_serialize(custom_price: float = None) -> dict:
     import time
     import numpy as np
     t0 = time.time()
 
-    from app.tracker import _compute, _load_data
-    sig = _compute(_load_data())
+    from app.tracker import _compute
+    from src.data_fetcher.akshare_source import AKShareSource
+
+    # 极速模式: 只拉取医药指数, 跳过宏观数据 (14s → <1s)
+    med_df = AKShareSource().fetch_sw_medical("20180101")
+    fast_data = {"sw_medical": med_df}
+
+    sig = _compute(fast_data, custom_price=custom_price)
 
     df = sig.get("df")
     dist = sig.get("distance_to_trigger", {})
@@ -3322,9 +3365,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_api(self):
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        custom_price = float(qs["price"][0]) if "price" in qs else None
         print(f"  [{datetime.now():%H:%M:%S}] 拉取数据中...")
         try:
-            payload = _compute_and_serialize()
+            payload = _compute_and_serialize(custom_price=custom_price)
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

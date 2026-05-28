@@ -31,14 +31,15 @@ class AKShareSource:
 
         # 2. 用 512290(生物医药ETF) 盘中涨跌幅推算指数实时点位
         try:
-            spot_df = ak.stock_zh_a_spot_em()
+            today = pd.Timestamp.today().normalize()
+            if today.weekday() >= 5:
+                raise Exception("周末休市, 跳过实时数据")
+            spot_df = ak.fund_etf_spot_em()
             etf = spot_df[spot_df["代码"] == "512290"]
             if not etf.empty:
                 pct_change = float(etf["涨跌幅"].iloc[0]) / 100.0
                 last_close = df.iloc[-1]["close"]
                 realtime_price = last_close * (1 + pct_change)
-
-                today = pd.Timestamp.today().normalize()
                 if df.iloc[-1]["date"] < today:
                     new_row = {"date": today, "close": realtime_price, "open": realtime_price,
                                "high": realtime_price, "low": realtime_price,
@@ -47,7 +48,7 @@ class AKShareSource:
                 else:
                     df.loc[df.index[-1], "close"] = realtime_price
                 print(f"[AKShare] ETF代理: 512290涨跌{pct_change*100:+.2f}% → 指数估算 {realtime_price:.2f}")
-        except Exception:
+        except Exception as e:
             pass  # 周末休市或网络不佳，退回历史数据
 
         if end_date is None:
