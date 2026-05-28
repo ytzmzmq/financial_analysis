@@ -61,14 +61,14 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med_w = med.resample("W-FRI").last().dropna()
 
     det = V5Detector()
-    df = det.compute(med_w)
+    df = det.compute(med_w, vol_w=None, margin_w=None)
     latest = df.iloc[-1]
 
     score = float(latest["score"])
-    if score < 4:        pct, label, color = 0, "观望 (0%)", "#9CA3AF"
-    elif score < 5.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
-    elif score < 6.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
-    else:                pct, label, color = 60, "重仓 60% — 双因子触发", "#EF4444"
+    if score < 2.5:      pct, label, color = 0, "观望 (0%)", "#9CA3AF"
+    elif score < 3.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
+    elif score < 5.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
+    else:                pct, label, color = 60, "重仓 60% — 多因子触发", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
@@ -82,8 +82,9 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
     rule_defs = [
-        ("M1:偏度异常(6.0分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
-        ("V1:估值冰点(4.0分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
+        ("M1:偏度异常(4.5分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
+        ("S3:融资背离(3.0分)", bool(latest.get("rule_S3",0)), "融资+价格新低", "融资逆势加仓"),
+        ("V1:估值冰点(2.5分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
     ]
     rules_html = ""
     for name, ok, val, thresh in rule_defs:

@@ -181,18 +181,19 @@ class TurningPointDetector:
 
 
 class V5Detector:
-    """V5.0 优化版探测器: 评分卡加权, 数据驱动阈值"""
+    """V5.0 优化版探测器: 3因子评分卡 (偏度4.5 + 融资背离3.0 + 估值冰点2.5)"""
 
-    V5_SCORECARD = {"M1_skew_neg": 6.0, "V1_price_5y_low": 4.0}
-    V5_THRESHOLD = 5.5
+    V5_SCORECARD = {"M1_skew_neg": 4.5, "S3_margin_diverge": 3.0, "V1_price_5y_low": 2.5}
+    V5_THRESHOLD = 3.5  # 历史8次独立机会, Uplift +8.5%, CI [+3.8%,+13.9%]
 
     def __init__(self):
         pass
 
-    def compute(self, med_w: pd.Series) -> pd.DataFrame:
+    def compute(self, med_w: pd.Series, vol_w: pd.Series = None,
+                margin_w: pd.Series = None) -> pd.DataFrame:
         from src.models.factor_optimizer import build_factor_pool, _rsi_wilder, _macd_histogram
 
-        pool = build_factor_pool(med_w)
+        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
         df = pd.DataFrame(index=med_w.index)
         df["price"] = med_w
         df["rsi"] = _rsi_wilder(med_w, 14)
@@ -201,21 +202,17 @@ class V5Detector:
         df["val_pct_5y"] = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
         df["vol_annual"] = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
 
-        # V5 评分
         df["score"] = 0.0
         for f, w in self.V5_SCORECARD.items():
             if f in pool.columns:
                 df["score"] += pool[f] * w
         df["score"] = df["score"].round(1)
 
-        # 规则详细状态
         df["rule_M1"] = pool.get("M1_skew_neg", pd.Series(0, index=df.index))
         df["rule_V1"] = pool.get("V1_price_5y_low", pd.Series(0, index=df.index))
+        df["rule_S3"] = pool.get("S3_margin_diverge", pd.Series(0, index=df.index))
 
-        # 信号
         df["armed"] = (df["score"] >= self.V5_THRESHOLD).astype(int)
-
-        # 右侧确认
         df["macd_hist"] = _macd_histogram(med_w)
         df["macd_stable"] = (df["macd_hist"] >= df["macd_hist"].shift(1)).astype(int)
         df["above_ma2"] = (med_w > med_w.rolling(2).mean()).astype(int)

@@ -17,69 +17,75 @@ from scipy.stats import percentileofscore
 # 阶段1: 候选因子池
 # ═══════════════════════════════════════════
 
-def build_factor_pool(med_w: pd.Series) -> pd.DataFrame:
+def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
+                      pe_w: pd.Series = None, margin_w: pd.Series = None) -> pd.DataFrame:
     """
     构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
-
-    Returns: DataFrame(index=med_w.index, columns=因子名, values=0/1)
     """
     pool = pd.DataFrame(index=med_w.index)
 
     # ── 维度1: 估值 (Valuation) ──
-    # V1: 5年价格分位 < 15% (极度便宜)
     pool["V1_price_5y_low"] = (
         med_w.rolling(260, min_periods=52).rank(pct=True) < 0.15
     ).astype(int)
 
-    # V2: 价格距52周低点 < 5% (接近一年低点)
     ll_52w = med_w.rolling(52).min()
     pool["V2_near_52w_low"] = ((med_w / ll_52w - 1) < 0.05).astype(int)
 
-    # V3: 连续下跌 > 8周 (长期阴跌后的估值修复概率高)
     down_streak = (med_w.pct_change() < 0).astype(int)
     pool["V3_down_8w"] = (down_streak.rolling(8).sum() >= 7).astype(int)
 
-    # ── 维度2: 量价冰点 (Liquidity) ──
-    # L1: 周线RSI Wilder < 30
-    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
+    # V4: PE估值冰点 (真实PE < 5年15%分位, 无PE数据则退化为价格分位)
+    if pe_w is not None and len(pe_w.dropna()) > 52:
+        pe_aligned = pe_w.reindex(med_w.index).ffill()
+        pool["V4_true_pe_low"] = (
+            pe_aligned.rolling(260, min_periods=52).rank(pct=True) < 0.15
+        ).astype(int)
 
-    # L2: 13周最大回撤 < -12% (加深阈值, 比V3的-10%更严)
+    # ── 维度2: 量价冰点 (Liquidity) ──
+    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
     pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
 
-    # L3: 波动率收缩 < 过去2年25分位 (暴风雨前的宁静)
     vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
     pool["L3_vol_shrink"] = (
         vol < vol.rolling(104, min_periods=52).quantile(0.25)
     ).astype(int)
 
+    # L4: 地量冰点 (成交量<2年10%分位, 无人问津)
+    if vol_w is not None and len(vol_w.dropna()) > 52:
+        vol_aligned = vol_w.reindex(med_w.index).ffill()
+        pool["L4_vol_freezing"] = (
+            vol_aligned.rolling(104, min_periods=52).rank(pct=True) < 0.10
+        ).astype(int)
+
     # ── 维度3: 动能衰竭 (Momentum) ──
-    # M1: 收益偏度 < -1.5 (极端左尾, 比之前-1更严)
     skew = med_w.pct_change().rolling(13).skew()
     pool["M1_skew_neg"] = (skew < -1.5).astype(int)
-
-    # M2: 4周累计跌幅 > 8% (加速下跌)
     pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
 
-    # M3: MACD 柱状线创13周新低
     macd_hist = _macd_histogram(med_w)
-    pool["M3_macd_low"] = (
-        macd_hist < macd_hist.rolling(13).min()
-    ).astype(int)
+    pool["M3_macd_low"] = (macd_hist < macd_hist.rolling(13).min()).astype(int)
 
     # ── 维度4: 资金背离 (Smart Money) ──
-    # S1: 价格跌但RSI不创新低 (底背离)
     ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
     pool["S1_divergence"] = (
         (pool["V2_near_52w_low"] == 1) &
         (_rsi_wilder(med_w, 14) > ll_rsi + 5)
     ).astype(int)
 
-    # S2: 下跌放缓 (本周跌幅 < 前4周平均跌幅)
     weekly_ret = med_w.pct_change() * 100
-    avg_down_4w = weekly_ret.rolling(4).mean()
     pool["S2_down_slowing"] = (
-        (weekly_ret < 0) & (weekly_ret > avg_down_4w)
+        (weekly_ret < 0) & (weekly_ret > weekly_ret.rolling(4).mean())
     ).astype(int)
+
+    # S3: 融资底背离 (价格13周新低 + 融资4周逆势加仓)
+    if margin_w is not None and len(margin_w.dropna()) > 20:
+        margin_aligned = margin_w.reindex(med_w.index).ffill()
+        price_13w_low = (med_w == med_w.rolling(13).min()).astype(int)
+        margin_chg_4w = margin_aligned.pct_change(4)
+        pool["S3_margin_diverge"] = (
+            (price_13w_low == 1) & (margin_chg_4w > 0)
+        ).astype(int)
 
     return pool.fillna(0).astype(int)
 
@@ -301,7 +307,8 @@ def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
 # 一键运行
 # ═══════════════════════════════════════════
 
-def run_full_pipeline(med_w: pd.Series) -> dict:
+def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
+                       pe_w: pd.Series = None, margin_w: pd.Series = None) -> dict:
     """执行完整五阶段优化, 返回所有结果"""
     print("=" * 60)
     print("  V5.0 因子自动筛选与赋权框架")
@@ -309,7 +316,7 @@ def run_full_pipeline(med_w: pd.Series) -> dict:
 
     # 阶段1
     print("\n[阶段1] 构建候选因子池...")
-    pool = build_factor_pool(med_w)
+    pool = build_factor_pool(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w)
     print(f"  候选因子: {len(pool.columns)} 个")
 
     # 阶段2

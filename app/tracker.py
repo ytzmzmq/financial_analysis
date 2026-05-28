@@ -38,7 +38,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         med_w.iloc[-1] = custom_price
 
     det = V5Detector()
-    df = det.compute(med_w)
+    df = det.compute(med_w, vol_w=None, margin_w=None)
     latest = df.iloc[-1]
 
     # V5 评分卡因子
