@@ -1,13 +1,15 @@
 """
-医药板块风险收益比监控器 V4.1
+医药板块风险收益比监控器 V4.3
 
-核心变更 (V4→V4.1):
-  1. 标签: 阈值式 → Triple Barrier (路径依赖, 无look-ahead)
-  2. 评估: Precision/Recall → 条件期望 E[ret|Armed] vs E[ret]
-  3. 信号去重: 保留cluster内第一条（最早可操作信号）
-  4. 规则相关性: Pearson → conditional probability P(A|B)
-  5. Benchmark对照: unconditional forward return
-  6. Label clustering: 连续好买点合并, 避免Recall失真
+功能:
+  1. Triple Barrier 标签 (路径依赖, +8%/-5%, 13周)
+  2. 五规则探测器 (RSI Wilder / DD / Cheap / Panic / Micro)
+  3. 条件期望评估 E[ret|Armed] vs E[ret]
+  4. 规则条件概率 P(A=1|B=1)
+  5. 信号去重 (保留cluster第一条)
+  6. Distance-to-Trigger (反推触发目标价)
+  7. 三级警报 (silent/yellow/red)
+  8. Bootstrap CI + Benchmark 对照 + 参数敏感性
 """
 import pandas as pd
 import numpy as np
