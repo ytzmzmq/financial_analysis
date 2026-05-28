@@ -141,7 +141,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 <body><div class="container">
 <div class="header">
   <h1>医药板块 风险收益比监控器</h1>
-  <p>申万医药生物(801150) | 数据至 {data_date_str} | EOD 模式 | 耗时 {time.time()-t0:.1f}s</p>
+  <p>申万医药生物(801150) | 数据至 {data_date_str} | {"实时 (via 512170 ETF)" if med.index[-1].date() == pd.Timestamp.today().date() else "EOD"} | 耗时 {time.time()-t0:.1f}s</p>
 </div>
 <div class="card"><div class="position-card">
   <div class="pct" style="color:{color}">{pct}%</div>

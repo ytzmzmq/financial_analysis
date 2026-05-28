@@ -7,8 +7,22 @@ try:
 except ImportError:
     ak = None
 
-def fetch_realtime_price(symbol: str = "801150") -> float | None:
-    """实时价格（预留接口，当前网络环境无法访问东方财富 API）"""
+def fetch_realtime_price() -> float | None:
+    """通过 Sina 抓取 512170(医疗ETF) 实时价, 映射到 801150"""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            "http://hq.sinajs.cn/list=sh512170",
+            headers={"Referer": "https://finance.sina.com.cn"})
+        resp = urllib.request.urlopen(req, timeout=5).read().decode("gbk", errors="ignore")
+        parts = resp.split('"')[1].split(",")
+        current = float(parts[3])   # 当前价
+        prev_close = float(parts[2])  # 昨收
+        if prev_close > 0:
+            pct = (current / prev_close - 1)
+            return pct  # 返回涨跌幅, 由调用方乘以801150昨收
+    except Exception:
+        pass
     return None
 
 
@@ -32,6 +46,21 @@ class AKShareSource:
             "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+
+        # ETF 实时映射: Sina 抓 512170 涨跌幅 → 映射到 801150
+        try:
+            today = pd.Timestamp.today().normalize()
+            if today.weekday() < 5 and df.iloc[-1]["date"] < today:
+                pct = fetch_realtime_price()
+                if pct is not None:
+                    rt = df.iloc[-1]["close"] * (1 + pct)
+                    df = pd.concat([df, pd.DataFrame([{
+                        "date": today, "close": rt, "open": rt,
+                        "high": rt, "low": rt, "volume": 0, "amount": 0
+                    }])], ignore_index=True)
+                    print(f"[AKShare] ETF实时: 512170涨跌{pct*100:+.2f}% → 801150={rt:.2f}")
+        except Exception:
+            pass
 
         if end_date is None:
             end_date = pd.Timestamp.now().strftime("%Y%m%d")
