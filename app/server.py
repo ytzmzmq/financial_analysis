@@ -33,8 +33,7 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>医药板块监控器</title>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-<script>window.lightweightCharts||document.write('<script src=\"https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js\"><\/script>')</script>
+<script src="/static/lc.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -495,6 +494,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/signal"):
             self._serve_api()
+        elif self.path.startswith("/static/"):
+            self._serve_static()
         else:
             self._serve_html()
 
@@ -505,6 +506,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_static(self):
+        fname = self.path.split("/")[-1]
+        fpath = Path(__file__).resolve().parent / "static" / fname
+        if fpath.exists():
+            body = fpath.read_bytes()
+            ct = "application/javascript" if fname.endswith(".js") else "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", len(body))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404); self.end_headers()
 
     def _serve_api(self):
         from urllib.parse import urlparse, parse_qs
