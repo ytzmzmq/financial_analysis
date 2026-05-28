@@ -51,7 +51,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 def build_dashboard(output_path: str = "dashboard.html"):
     from src.data_fetcher.akshare_source import AKShareSource
-    from src.models.turning_points import TurningPointDetector, collapse_signals
+    from src.models.turning_points import V5Detector, collapse_signals
 
     t0 = time.time()
     print("生成看板...")
@@ -60,17 +60,15 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
 
-    det = TurningPointDetector()
+    det = V5Detector()
     df = det.compute(med_w)
     latest = df.iloc[-1]
 
-    score = int(latest["score"])
-    if score <= 1:       pct, label, color = 0, "观望 (0%)", "#9CA3AF"
-    elif score == 2:
-        if bool(latest["right_confirm"]): pct, label, color = 30, "轻仓 30%", "#F59E0B"
-        else:                             pct, label, color = 15, "试探仓 15%", "#F59E0B"
-    elif score == 3:     pct, label, color = 50, "半仓 50%", "#F97316"
-    else:                pct, label, color = 70, "重仓 70%", "#EF4444"
+    score = float(latest["score"])
+    if score < 4:        pct, label, color = 0, "观望 (0%)", "#9CA3AF"
+    elif score < 5.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
+    elif score < 6.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
+    else:                pct, label, color = 60, "重仓 60% — 双因子触发", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
@@ -84,11 +82,8 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
     rule_defs = [
-        ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30"),
-        ("D: 深度回撤", bool(latest["rule_dd"]), f'{latest["drawdown_13w"]:.1f}%', "< -10%"),
-        ("C: 极度便宜", bool(latest["rule_cheap"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
-        ("P: 恐慌指数", bool(latest["rule_panic"]), f'偏度{latest["skew_13w"]:.2f}', "偏度<-1 或 波动飙升"),
-        ("M: 聪明钱", bool(latest["rule_micro"]), "待数据", "ETF份额逆势增"),
+        ("M1:偏度异常(6.0分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
+        ("V1:估值冰点(4.0分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
     ]
     rules_html = ""
     for name, ok, val, thresh in rule_defs:

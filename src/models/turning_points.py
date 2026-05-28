@@ -1,7 +1,12 @@
 """
-医药板块风险收益比监控器 V4.3
+医药板块风险收益比监控器 V5.0
 
-功能:
+V5 新增: 五阶段因子优化框架 (factor_optimizer.py)
+  - 评分卡: M1_skew_neg=6.0分, V1_price_5y_low=4.0分
+  - 阈值: >=5.5分触发Armed
+  - 独立机会: 6次, Uplift +8.0%, CI [+3.5%,+13.7%]
+
+V4 功能:
   1. Triple Barrier 标签 (路径依赖, +8%/-5%, 13周)
   2. 五规则探测器 (RSI Wilder / DD / Cheap / Panic / Micro)
   3. 条件期望评估 E[ret|Armed] vs E[ret]
@@ -173,6 +178,51 @@ class TurningPointDetector:
         ef = close.ewm(span=fast, adjust=False).mean()
         es = close.ewm(span=slow, adjust=False).mean()
         return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+
+
+class V5Detector:
+    """V5.0 优化版探测器: 评分卡加权, 数据驱动阈值"""
+
+    V5_SCORECARD = {"M1_skew_neg": 6.0, "V1_price_5y_low": 4.0}
+    V5_THRESHOLD = 5.5
+
+    def __init__(self):
+        pass
+
+    def compute(self, med_w: pd.Series) -> pd.DataFrame:
+        from src.models.factor_optimizer import build_factor_pool, _rsi_wilder, _macd_histogram
+
+        pool = build_factor_pool(med_w)
+        df = pd.DataFrame(index=med_w.index)
+        df["price"] = med_w
+        df["rsi"] = _rsi_wilder(med_w, 14)
+        df["drawdown_13w"] = (med_w / med_w.rolling(13).max() - 1) * 100
+        df["skew_13w"] = med_w.pct_change().rolling(13).skew()
+        df["val_pct_5y"] = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
+        df["vol_annual"] = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
+
+        # V5 评分
+        df["score"] = 0.0
+        for f, w in self.V5_SCORECARD.items():
+            if f in pool.columns:
+                df["score"] += pool[f] * w
+        df["score"] = df["score"].round(1)
+
+        # 规则详细状态
+        df["rule_M1"] = pool.get("M1_skew_neg", pd.Series(0, index=df.index))
+        df["rule_V1"] = pool.get("V1_price_5y_low", pd.Series(0, index=df.index))
+
+        # 信号
+        df["armed"] = (df["score"] >= self.V5_THRESHOLD).astype(int)
+
+        # 右侧确认
+        df["macd_hist"] = _macd_histogram(med_w)
+        df["macd_stable"] = (df["macd_hist"] >= df["macd_hist"].shift(1)).astype(int)
+        df["above_ma2"] = (med_w > med_w.rolling(2).mean()).astype(int)
+        df["right_confirm"] = ((df["macd_stable"] == 1) | (df["above_ma2"] == 1)).astype(int)
+        df["buy_signal"] = ((df["armed"] == 1) & (df["right_confirm"] == 1)).astype(int)
+
+        return df
 
 
 # ═══════════════════════════════════════════
@@ -491,18 +541,19 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
     latest = df.iloc[-1]
     curr_price = latest['price']
 
-    # Rule D (13周回撤 < -10%): 跌破过去13周最高点的 90% 即触发
+    # Rule D: 13周回撤 < -10%
     max_13w = med_w.rolling(13).max().iloc[-1]
     trigger_d = max_13w * 0.90
-    triggered_d = bool(latest['rule_dd'])
+    dd_val = (curr_price / max_13w - 1) * 100
+    triggered_d = dd_val < -10
     pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
 
-    # Rule C (5年分位 < 15%): 过去260周价格的 15% 分位数 = 触发底线
+    # Rule C: 5年分位 < 15%
     if len(med_w) >= 52:
         trigger_c = med_w.tail(260).quantile(0.15)
     else:
         trigger_c = np.nan
-    triggered_c = bool(latest['rule_cheap'])
+    triggered_c = curr_price < trigger_c if not np.isnan(trigger_c) else False
     pct_away_c = (trigger_c / curr_price - 1) * 100 if not triggered_c and not np.isnan(trigger_c) else 0.0
 
     return {

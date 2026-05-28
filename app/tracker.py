@@ -28,7 +28,7 @@ def _load_data() -> dict:
 
 def _compute(data: dict, custom_price: float = None) -> dict:
     """计算信号。custom_price: 可选, 用指定价格覆盖最新周数据（用于试算）"""
-    from src.models.turning_points import TurningPointDetector
+    from src.models.turning_points import V5Detector
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
@@ -37,20 +37,15 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     if custom_price is not None and len(med_w) > 0:
         med_w.iloc[-1] = custom_price
 
-    det = TurningPointDetector()
+    det = V5Detector()
     df = det.compute(med_w)
     latest = df.iloc[-1]
 
-    # 规则状态直接从 df 读取（与 Score 计算完全一致）
+    # V5 评分卡因子
     rule_defs = [
-        ("rule_rsi",   "R:RSI超卖",     f"{latest['rsi']:.1f}",               "< 30",          "短期动能衰竭"),
-        ("rule_dd",    "D:深度回撤",     f"{latest['drawdown_13w']:.1f}%",     "< -10%",        "跌幅充分"),
-        ("rule_cheap", "C:极度便宜",     f"{latest['val_pct_5y']:.0f}%",       "< 15%分位",     "历史底部区域"),
-        ("rule_panic", "P:恐慌指数",     f"偏度{latest['skew_13w']:.2f}/波动率{latest['vol_annual']:.1f}%",
-                                         "偏度<-1 或 波动>80分位",               "极端左尾或恐慌"),
-        ("rule_micro", "M:聪明钱流入",   "ETF份额",                             "价跌+份额增",    "机构越跌越买"),
+        ("rule_M1", "M1:偏度异常", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾 (6.0分)"),
+        ("rule_V1", "V1:估值冰点", f"{latest['val_pct_5y']:.0f}%", "< 15%", "历史低位 (4.0分)"),
     ]
-
     rules_status = []
     for col, name, val, thresh, desc in rule_defs:
         rules_status.append({
@@ -74,7 +69,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         hist = hist[hist["date"] != today_str]
     else:
         hist = pd.DataFrame(columns=["date", "score"])
-    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": int(latest["score"])}])], ignore_index=True)
+    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": round(latest["score"], 1)}])], ignore_index=True)
     hist.to_csv(hist_path, index=False)
 
     alert = alert_level(df, prev_score)
@@ -87,7 +82,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         "val_pct_5y": latest["val_pct_5y"],
         "skew": latest["skew_13w"],
         "vol": latest["vol_annual"],
-        "score": int(latest["score"]),
+        "score": round(latest["score"], 1),
         "armed": bool(latest["armed"]),
         "buy": bool(latest["buy_signal"]),
         "macd_ok": bool(latest["macd_stable"]),
