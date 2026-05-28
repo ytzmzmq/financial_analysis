@@ -60,11 +60,6 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
 
-    # 检查是否有实时数据
-    has_realtime = med.index[-1].date() == pd.Timestamp.today().date()
-    price_source = "实时" if has_realtime else f"EOD 昨收"
-    price_color = "#10b981" if has_realtime else "#f59e0b"
-
     det = TurningPointDetector()
     df = det.compute(med_w)
     latest = df.iloc[-1]
@@ -146,7 +141,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 <body><div class="container">
 <div class="header">
   <h1>医药板块 风险收益比监控器</h1>
-  <p>申万医药生物(801150) | 指标至 {data_date_str} | 价格来源: <b style="color:{price_color}">{price_source}</b> | 耗时 {time.time()-t0:.1f}s</p>
+  <p>申万医药生物(801150) | 数据至 {data_date_str} | EOD 模式 | 耗时 {time.time()-t0:.1f}s</p>
 </div>
 <div class="card"><div class="position-card">
   <div class="pct" style="color:{color}">{pct}%</div>

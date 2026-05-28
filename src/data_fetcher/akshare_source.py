@@ -8,31 +8,7 @@ except ImportError:
     ak = None
 
 def fetch_realtime_price(symbol: str = "801150") -> float | None:
-    """实时价格：依次尝试多数据源，全部失败返回 None（降级到 EOD）"""
-    import json as _json
-
-    def _get(url, timeout=8):
-        """绕过系统代理的 HTTP GET"""
-        import http.client, urllib.parse, ssl
-        ctx = ssl.create_default_context()
-        parts = urllib.parse.urlparse(url)
-        conn = http.client.HTTPSConnection(parts.hostname, timeout=timeout, context=ctx)
-        conn.request("GET", parts.path + ("?" + parts.query if parts.query else ""))
-        resp = conn.getresponse()
-        return resp.read().decode("utf-8", errors="ignore")
-
-    # ── 数据源 1: 东方财富 (000933 映射) ──
-    try:
-        data = _json.loads(_get(
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?"
-            "fltt=2&fields=f2,f3&secids=1.000933"))
-        item = data["data"]["diff"][0]
-        print(f"  [实时] 东财 000933: {item['f2']:.2f} ({item['f3']:+.2f}%)")
-        return float(item["f2"]) * 0.995
-    except Exception as e:
-        print(f"  [实时] 东财失败: {e}")
-
-    print("  [实时] 全部失败，降级 EOD")
+    """实时价格（预留接口，当前网络环境无法访问东方财富 API）"""
     return None
 
 
@@ -56,18 +32,6 @@ class AKShareSource:
             "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
-
-        # 多源实时价格，失败则降级 EOD
-        try:
-            today = pd.Timestamp.today().normalize()
-            if today.weekday() < 5 and df.iloc[-1]["date"] < today:
-                rt_price = fetch_realtime_price("801150")
-                if rt_price is not None:
-                    new_row = {"date": today, "close": rt_price, "open": rt_price,
-                               "high": rt_price, "low": rt_price, "volume": 0, "amount": 0}
-                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        except Exception:
-            pass
 
         if end_date is None:
             end_date = pd.Timestamp.now().strftime("%Y%m%d")
