@@ -534,62 +534,58 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
 # ═══════════════════════════════════════════
 
 def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
-    """计算当前价格距离 Rule D (回撤) 和 Rule C (估值) 触发的绝对价位差距"""
+    """计算当前价格距离 S3 (新低背离) 和 V1 (估值冰点) 触发的价位差距"""
     latest = df.iloc[-1]
     curr_price = latest['price']
 
-    # Rule D: 13周回撤 < -10%
-    max_13w = med_w.rolling(13).max().iloc[-1]
-    trigger_d = max_13w * 0.90
-    dd_val = (curr_price / max_13w - 1) * 100
-    triggered_d = dd_val < -10
-    pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
-
-    # Rule C: 5年分位 < 15%
-    if len(med_w) >= 52:
-        trigger_c = med_w.tail(260).quantile(0.15)
+    # S3 (融资背离触发底线): 跌破过去12周最低点 = 创13周新低
+    if len(med_w) >= 13:
+        trigger_s3 = med_w.iloc[-13:-1].min()
     else:
-        trigger_c = np.nan
-    triggered_c = curr_price < trigger_c if not np.isnan(trigger_c) else False
-    pct_away_c = (trigger_c / curr_price - 1) * 100 if not triggered_c and not np.isnan(trigger_c) else 0.0
+        trigger_s3 = np.nan
+    triggered_s3 = bool(latest.get('rule_S3', 0))
+    pct_away_s3 = (trigger_s3 / curr_price - 1) * 100 if not triggered_s3 and not np.isnan(trigger_s3) else 0.0
+
+    # V1 (5年分位 < 15%): 过去260周价格的 15% 分位数 = 估值触发底线
+    if len(med_w) >= 52:
+        trigger_v1 = med_w.tail(260).quantile(0.15)
+    else:
+        trigger_v1 = np.nan
+    triggered_v1 = bool(latest.get('rule_V1', 0))
+    pct_away_v1 = (trigger_v1 / curr_price - 1) * 100 if not triggered_v1 and not np.isnan(trigger_v1) else 0.0
 
     return {
-        "D": {
-            "name": "深度回撤(Rule D)", "triggered": triggered_d,
-            "current": curr_price, "trigger_price": trigger_d, "pct_away": pct_away_d,
+        "S3": {
+            "name": "新低背离(S3)", "triggered": triggered_s3,
+            "current": curr_price, "trigger_price": trigger_s3, "pct_away": pct_away_s3,
         },
-        "C": {
-            "name": "极度便宜(Rule C)", "triggered": triggered_c,
-            "current": curr_price, "trigger_price": trigger_c, "pct_away": pct_away_c,
+        "V1": {
+            "name": "估值冰点(V1)", "triggered": triggered_v1,
+            "current": curr_price, "trigger_price": trigger_v1, "pct_away": pct_away_v1,
         },
     }
 
 
-def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
-    """根据 Score 变化和距离阈值的远近，判断当天的报警级别"""
+def alert_level(df: pd.DataFrame, prev_score: float | None = None) -> dict:
+    """智能报警级别 (V5.1: 阈值 3.5)"""
     latest = df.iloc[-1]
-    curr_score = int(latest['score'])
-    if prev_score is None:
-        prev_score = curr_score
-
+    curr_score = float(latest['score'])
+    if prev_score is None: prev_score = curr_score
     dist = distance_to_trigger(df, df['price'])
 
-    # 状态翻转：昨天还没到击球区，今天盘中跌出了机会
-    if curr_score >= 2 and prev_score < 2:
+    if curr_score >= 3.5 and prev_score < 3.5:
         return {"level": "red",
-                "message": f"状态翻转！Score从 {prev_score} 突升至 {curr_score}/5！极值击球区出现！"}
-    # 持续在底部
-    elif curr_score >= 2:
+                "message": f"状态翻转！Score {prev_score} → {curr_score}！极值击球区！"}
+    elif curr_score >= 3.5:
         return {"level": "red",
-                "message": f"持续处于 Armed 状态 (Score {curr_score}/5)，按计划分批买入。"}
-    # 常态区，检查是否接近触发
+                "message": f"Armed (Score {curr_score})，按计划分批买入。"}
     else:
-        d_away = abs(dist['D']['pct_away']) if not dist['D']['triggered'] else 999
-        c_away = abs(dist['C']['pct_away']) if not dist['C']['triggered'] else 999
-        min_away = min(d_away, c_away)
+        s3_away = abs(dist['S3']['pct_away']) if not dist['S3']['triggered'] else 999
+        v1_away = abs(dist['V1']['pct_away']) if not dist['V1']['triggered'] else 999
+        min_away = min(s3_away, v1_away)
         if min_away <= 2.5:
             return {"level": "yellow",
-                    "message": f"临界预警！距底部极值线仅差 {min_away:.1f}%，随时可能触发，请备好资金。"}
+                    "message": f"临界预警！距极值线仅 {min_away:.1f}%，备好资金。"}
         else:
             return {"level": "silent",
-                    "message": "常态区间。未见极值错杀，安心生活。"}
+                    "message": "常态区间。"}

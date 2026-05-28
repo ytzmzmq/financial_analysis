@@ -21,9 +21,10 @@ except ImportError:
 def _load_data() -> dict:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from src.data_fetcher.akshare_source import AKShareSource
-    # 极速模式: 只拉医药指数, 跳过宏观慢速接口 (14s → <1s)
-    med_df = AKShareSource().fetch_sw_medical("20180101")
-    return {"sw_medical": med_df}
+    ak_src = AKShareSource()
+    med_df = ak_src.fetch_sw_medical("20180101")
+    margin_df = ak_src.fetch_margin_data("20180101")
+    return {"sw_medical": med_df, "total_margin": margin_df}
 
 
 def _compute(data: dict, custom_price: float = None) -> dict:
@@ -37,14 +38,21 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     if custom_price is not None and len(med_w) > 0:
         med_w.iloc[-1] = custom_price
 
+    # 融资数据 (T+1时滞)
+    margin_w = None
+    if "total_margin" in data and not data["total_margin"].empty:
+        mdf = data["total_margin"].set_index("date")["value"].sort_index()
+        margin_w = mdf.resample("W-FRI").last().dropna().shift(1)
+
     det = V5Detector()
-    df = det.compute(med_w, vol_w=None, margin_w=None)
+    df = det.compute(med_w, margin_w=margin_w)
     latest = df.iloc[-1]
 
-    # V5 评分卡因子
+    # V5.1 三因子评分卡
     rule_defs = [
-        ("rule_M1", "M1:偏度异常", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾 (6.0分)"),
-        ("rule_V1", "V1:估值冰点", f"{latest['val_pct_5y']:.0f}%", "< 15%", "历史低位 (4.0分)"),
+        ("rule_M1", "M1:偏度异常(4.5分)", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾恐慌"),
+        ("rule_S3", "S3:融资背离(3.0分)", "已触发" if latest.get("rule_S3",0) else "未触发", "价新低+融资增", "聪明钱抄底"),
+        ("rule_V1", "V1:估值冰点(2.5分)", f"{latest['val_pct_5y']:.0f}%", "< 15%分位", "历史低位区域"),
     ]
     rules_status = []
     for col, name, val, thresh, desc in rule_defs:
@@ -132,7 +140,7 @@ def run_cli():
     # Distance to trigger
     print(f"\n  距离触发:")
     dist = sig["distance_to_trigger"]
-    for key in ["D", "C"]:
+    for key in ["S3", "V1"]:
         d = dist[key]
         if d["triggered"]:
             print(f"    {d['name']}: 已触发")

@@ -112,7 +112,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
             waterline_html += f'<div style="padding:6px 12px;background:#fefce8;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 触发价 <b>{dv["trigger_price"]:.0f}</b> (距当前 {dv["pct_away"]:+.1f}%)</div>'
 
     waterline_prices = {}
-    for key in ["D", "C"]:
+    for key in ["S3", "V1"]:
         if not dist[key]["triggered"] and dist[key].get("trigger_price") and not np.isnan(dist[key]["trigger_price"]):
             waterline_prices[key] = dist[key]["trigger_price"]
 
@@ -190,8 +190,8 @@ try {{
     }});
     line.setData(prices); line.setMarkers(markers);
     var waterlines = {waterline_json};
-    var colors = {{ 'D': '#EF4444', 'C': '#10B981' }};
-    var labels = {{ 'D': '回撤触发', 'C': '估值触发' }};
+    var colors = {{ 'S3': '#EF4444', 'V1': '#10B981' }};
+    var labels = {{ 'S3': '新低触发', 'V1': '估值触发' }};
     Object.keys(waterlines).forEach(function(key) {{
         var price = waterlines[key];
         var wl = chart.addLineSeries({{ color: colors[key], lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }});
