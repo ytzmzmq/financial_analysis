@@ -1,13 +1,13 @@
-# 医药板块 V5.0 - 完整代码包
+# 医药板块 V5.1 - 完整代码包
 
-11 files | V5.0 | 五阶段因子优化框架
+12 files | V5.1 | 三因子评分卡(S3融资背离通过检验)
 
-## 方法论报告 V5.0
+## 方法论报告 V5.1
 `REPORT.md`
 ```markdown
 # 医药板块风险收益比监控器 — V5.0 因子优化框架
 
-**日期**: 2026-05-29 | **版本**: V5.0
+**日期**: 2026-05-29 | **版本**: V5.1
 
 ---
 
@@ -47,14 +47,15 @@
 
 **漏斗 3 — 稳健性置信度**：Uplift = 条件期望 - 无条件期望。Bootstrap 2000 次，95% CI 下限必须 > +1.0%。
 
-**检验结果**：11 个候选因子，仅 **2 个通过**：
+**检验结果**：**检验结果（V5.1）**：13 个候选因子，**3 个通过**（新增融资背离因子 S3）：
 
 | 因子 | 频率 | E[ret\|触发] | Uplift | 95% CI | 
 |------|:---:|:----------:|:------:|:------:|
 | **M1: 偏度异常 (<-1.5)** | 4.2% | +8.7% | +8.0% | [+2.8%, +13.0%] |
+| **S3: 融资底背离 (新增!)** | 4.0% | +6.2% | +5.5% | [+1.6%, +9.2%] |
 | **V1: 价格5年低位 (<15%)** | 14.2% | +5.6% | +4.9% | [+1.6%, +8.2%] |
 
-被淘汰的 9 个因子中，多数卡在漏斗 2（期望收益不足 5%）或漏斗 3（CI 下限跨零）。
+S3 是系统中首个通过检验的**资金面因子**（价格13周新低 + 融资余额4周逆势增加），证实了"聪明钱左侧抄底"的统计有效性。L4(地量冰点)未通过漏斗 2。
 
 ### 阶段 3：条件概率去重
 
@@ -66,8 +67,9 @@
 
 | 因子 | Uplift | 权重建模 | 最终得分 |
 |------|:------:|:--------:|:-------:|
-| M1: 偏度异常 | +8.0% | 62% | **6.0** |
-| V1: 估值冰点 | +4.9% | 38% | **4.0** |
+| M1: 偏度异常 | +8.0% | 44% | **4.5** |
+| S3: 融资背离 | +5.5% | 30% | **3.0** |
+| V1: 估值冰点 | +4.9% | 26% | **2.5** |
 
 离散化为 0.5 步长而非精确权重，防止过拟合。
 
@@ -85,7 +87,7 @@
 6.5       2     +18.2%    [N/A]           ← 机会太少
 ```
 
-**最优阈值：5.5 分**。6 次独立大底机会，Uplift +8.0%。实际含义：需要 M1(6.0分) 单独触发才能 Armed。V1(4.0分) 单独触发只能到 4.0/10，处于"关注区"。
+**最优阈值：3.5 分**。8 次独立大底机会，Uplift +8.5%，CI [+3.8%,+13.9%]。实际含义：偏度异常(4.5分)或融资背离(3.0分)+估值冰点(2.5分)组合均可触发 Armed。
 
 ---
 
@@ -664,7 +666,374 @@ start dashboard.html                      # 浏览器打开
 ```
 ---
 
-## 核心:V5检测器
+## 核心:五阶段因子优化
+`src/models/factor_optimizer.py`
+```python
+"""
+V5.0 因子自动筛选与赋权框架
+
+五阶段:
+  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney, 二值化, 无look-ahead)
+  2. 单因子三漏斗检验 (稀疏度2-15% + 收益>5% + Uplift CI下限>1%)
+  3. 条件概率去重 (P(A|B)>0.65则保留Uplift下限更高的)
+  4. Uplift驱动离散评分卡 (0.5步长, 满分10)
+  5. 阈值滑动寻优 (平衡Uplift与独立机会数)
+"""
+import pandas as pd
+import numpy as np
+from scipy.stats import percentileofscore
+
+
+# ═══════════════════════════════════════════
+# 阶段1: 候选因子池
+# ═══════════════════════════════════════════
+
+def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
+                      pe_w: pd.Series = None, margin_w: pd.Series = None) -> pd.DataFrame:
+    """
+    构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
+    """
+    pool = pd.DataFrame(index=med_w.index)
+
+    # ── 维度1: 估值 (Valuation) ──
+    pool["V1_price_5y_low"] = (
+        med_w.rolling(260, min_periods=52).rank(pct=True) < 0.15
+    ).astype(int)
+
+    ll_52w = med_w.rolling(52).min()
+    pool["V2_near_52w_low"] = ((med_w / ll_52w - 1) < 0.05).astype(int)
+
+    down_streak = (med_w.pct_change() < 0).astype(int)
+    pool["V3_down_8w"] = (down_streak.rolling(8).sum() >= 7).astype(int)
+
+    # V4: PE估值冰点 (真实PE < 5年15%分位, 无PE数据则退化为价格分位)
+    if pe_w is not None and len(pe_w.dropna()) > 52:
+        pe_aligned = pe_w.reindex(med_w.index).ffill()
+        pool["V4_true_pe_low"] = (
+            pe_aligned.rolling(260, min_periods=52).rank(pct=True) < 0.15
+        ).astype(int)
+
+    # ── 维度2: 量价冰点 (Liquidity) ──
+    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
+    pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
+
+    vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
+    pool["L3_vol_shrink"] = (
+        vol < vol.rolling(104, min_periods=52).quantile(0.25)
+    ).astype(int)
+
+    # L4: 地量冰点 (成交量<2年10%分位, 无人问津)
+    if vol_w is not None and len(vol_w.dropna()) > 52:
+        vol_aligned = vol_w.reindex(med_w.index).ffill()
+        pool["L4_vol_freezing"] = (
+            vol_aligned.rolling(104, min_periods=52).rank(pct=True) < 0.10
+        ).astype(int)
+
+    # ── 维度3: 动能衰竭 (Momentum) ──
+    skew = med_w.pct_change().rolling(13).skew()
+    pool["M1_skew_neg"] = (skew < -1.5).astype(int)
+    pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
+
+    macd_hist = _macd_histogram(med_w)
+    pool["M3_macd_low"] = (macd_hist < macd_hist.rolling(13).min()).astype(int)
+
+    # ── 维度4: 资金背离 (Smart Money) ──
+    ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
+    pool["S1_divergence"] = (
+        (pool["V2_near_52w_low"] == 1) &
+        (_rsi_wilder(med_w, 14) > ll_rsi + 5)
+    ).astype(int)
+
+    weekly_ret = med_w.pct_change() * 100
+    pool["S2_down_slowing"] = (
+        (weekly_ret < 0) & (weekly_ret > weekly_ret.rolling(4).mean())
+    ).astype(int)
+
+    # S3: 融资底背离 (价格13周新低 + 融资4周逆势加仓)
+    if margin_w is not None and len(margin_w.dropna()) > 20:
+        margin_aligned = margin_w.reindex(med_w.index).ffill()
+        price_13w_low = (med_w == med_w.rolling(13).min()).astype(int)
+        margin_chg_4w = margin_aligned.pct_change(4)
+        pool["S3_margin_diverge"] = (
+            (price_13w_low == 1) & (margin_chg_4w > 0)
+        ).astype(int)
+
+    return pool.fillna(0).astype(int)
+
+
+def _rsi_wilder(close, period=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def _macd_histogram(close, fast=12, slow=26, signal=9):
+    ef = close.ewm(span=fast, adjust=False).mean()
+    es = close.ewm(span=slow, adjust=False).mean()
+    return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+
+
+# ═══════════════════════════════════════════
+# 阶段2: 单因子三漏斗检验
+# ═══════════════════════════════════════════
+
+def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
+    """Bootstrap 95% CI for mean"""
+    if len(data) < 4:
+        return (np.nan, np.nan)
+    rng = np.random.RandomState(seed)
+    means = []
+    n = len(data)
+    for _ in range(n_iter):
+        idx = rng.choice(n, size=n, replace=True)
+        means.append(np.mean(data[idx]))
+    means = np.array(means)
+    return (np.percentile(means, 2.5), np.percentile(means, 97.5))
+
+
+def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
+                   forward_weeks: int = 13) -> pd.DataFrame:
+    """
+    三漏斗检验：稀疏度 → 收益 → 置信度
+    """
+    n_total = len(pool)
+    # 无条件13周期望收益
+    all_rets = np.array([
+        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+        for i in range(n_total - forward_weeks)
+    ])
+    e_uncond = np.mean(all_rets)
+
+    results = []
+    for col in pool.columns:
+        triggered = pool[col] == 1
+        n_triggered = triggered.sum()
+
+        # 漏斗1: 稀疏度 2%-15%
+        freq = n_triggered / n_total
+        if freq < 0.02 or freq > 0.15:
+            continue
+
+        # 漏斗2: 条件期望收益 > 5%
+        fwd_rets = []
+        for i in range(n_total - forward_weeks):
+            if triggered.iloc[i]:
+                fwd_rets.append(
+                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+                )
+        fwd_rets = np.array(fwd_rets)
+        e_cond = np.mean(fwd_rets)
+        if e_cond <= 5.0:
+            continue
+
+        # 漏斗3: Uplift CI下限 > 1%
+        uplift_vals = fwd_rets - e_uncond
+        ci_low, ci_high = bootstrap_ci(uplift_vals)
+        if np.isnan(ci_low) or ci_low <= 1.0:
+            continue
+
+        results.append({
+            "factor": col,
+            "dimension": col[:2],  # V/L/M/S
+            "freq": freq,
+            "e_cond": e_cond,
+            "e_uncond": e_uncond,
+            "uplift": e_cond - e_uncond,
+            "uplift_ci_low": ci_low,
+            "uplift_ci_high": ci_high,
+            "n_signals": n_triggered,
+        })
+
+    return pd.DataFrame(results).sort_values("uplift_ci_low", ascending=False)
+
+
+# ═══════════════════════════════════════════
+# 阶段3: 条件概率去重
+# ═══════════════════════════════════════════
+
+def deduplicate_factors(pool: pd.DataFrame, screened: pd.DataFrame,
+                         corr_threshold: float = 0.65) -> list:
+    """条件概率去重：P(A|B)>0.65 则保留Uplift CI下限更高的"""
+    survivors = screened["factor"].tolist()
+    removed = []
+
+    for i in range(len(survivors)):
+        if survivors[i] in removed:
+            continue
+        for j in range(i + 1, len(survivors)):
+            if survivors[j] in removed:
+                continue
+            a, b = survivors[i], survivors[j]
+            # P(A=1 | B=1)
+            b_true = pool[pool[b] == 1]
+            p_a_given_b = b_true[a].mean() if len(b_true) > 0 else 0
+            p_b_given_a = pool[pool[a] == 1][b].mean() if (pool[a]==1).sum() > 0 else 0
+
+            if max(p_a_given_b, p_b_given_a) > corr_threshold:
+                # 保留 Uplift CI 下限更高的
+                ci_a = screened[screened["factor"] == a]["uplift_ci_low"].values[0]
+                ci_b = screened[screened["factor"] == b]["uplift_ci_low"].values[0]
+                if ci_a >= ci_b:
+                    removed.append(b)
+                else:
+                    removed.append(a)
+
+    return [f for f in survivors if f not in removed]
+
+
+# ═══════════════════════════════════════════
+# 阶段4: Uplift驱动评分卡
+# ═══════════════════════════════════════════
+
+def build_scoring_card(screened: pd.DataFrame, final_factors: list,
+                        max_score: float = 10.0) -> pd.DataFrame:
+    """
+    按Uplift贡献度分配权重，离散化到0.5步长。
+    """
+    sub = screened[screened["factor"].isin(final_factors)].copy()
+    total_uplift = sub["uplift"].sum()
+    sub["raw_weight"] = sub["uplift"] / total_uplift
+    sub["raw_score"] = sub["raw_weight"] * max_score
+    sub["discrete_score"] = (sub["raw_score"] * 2).round() / 2  # 四舍五入到0.5
+    # 确保不低于0.5
+    sub["discrete_score"] = sub["discrete_score"].clip(lower=0.5)
+    # 总分归一化到max_score
+    scale = max_score / sub["discrete_score"].sum()
+    sub["final_score"] = (sub["discrete_score"] * scale * 2).round() / 2
+    return sub[["factor", "dimension", "uplift", "uplift_ci_low",
+                "raw_weight", "final_score"]].sort_values("final_score", ascending=False)
+
+
+# ═══════════════════════════════════════════
+# 阶段5: 阈值滑动寻优
+# ═══════════════════════════════════════════
+
+def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
+                           med_w: pd.Series, forward_weeks: int = 13) -> pd.DataFrame:
+    """
+    滑动阈值, 输出每个阈值下的Uplift和独立机会数。
+    """
+    # 计算加权总分
+    total_score = pd.Series(0, index=pool.index, dtype=float)
+    for _, row in scoring.iterrows():
+        f = row["factor"]
+        if f in pool.columns:
+            total_score += pool[f] * row["final_score"]
+
+    n_total = len(pool)
+    all_rets = np.array([
+        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+        for i in range(n_total - forward_weeks)
+    ])
+    e_uncond = np.mean(all_rets)
+
+    # 去重叠信号
+    def count_independent(triggered: np.ndarray, min_gap: int = 4) -> int:
+        dates = np.where(triggered)[0]
+        if len(dates) == 0:
+            return 0
+        count = 1
+        last = dates[0]
+        for d in dates[1:]:
+            if d - last >= min_gap:
+                count += 1
+                last = d
+        return count
+
+    results = []
+    thresholds = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
+    for thresh in thresholds:
+        triggered = (total_score >= thresh).values
+        n_independent = count_independent(triggered)
+
+        fwd_rets = []
+        for i in range(n_total - forward_weeks):
+            if triggered[i]:
+                fwd_rets.append(
+                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
+                )
+        fwd_rets = np.array(fwd_rets)
+        e_cond = np.mean(fwd_rets) if len(fwd_rets) > 0 else np.nan
+        uplift = e_cond - e_uncond if not np.isnan(e_cond) else np.nan
+        ci_low, ci_high = bootstrap_ci(fwd_rets) if len(fwd_rets) >= 4 else (np.nan, np.nan)
+
+        results.append({
+            "threshold": thresh,
+            "n_independent": n_independent,
+            "n_raw": int(triggered.sum()),
+            "e_cond": e_cond,
+            "uplift": uplift,
+            "uplift_ci_low": ci_low,
+            "uplift_ci_high": ci_high,
+        })
+
+    return pd.DataFrame(results)
+
+
+# ═══════════════════════════════════════════
+# 一键运行
+# ═══════════════════════════════════════════
+
+def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
+                       pe_w: pd.Series = None, margin_w: pd.Series = None) -> dict:
+    """执行完整五阶段优化, 返回所有结果"""
+    print("=" * 60)
+    print("  V5.0 因子自动筛选与赋权框架")
+    print("=" * 60)
+
+    # 阶段1
+    print("\n[阶段1] 构建候选因子池...")
+    pool = build_factor_pool(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w)
+    print(f"  候选因子: {len(pool.columns)} 个")
+
+    # 阶段2
+    print("\n[阶段2] 单因子三漏斗检验...")
+    screened = screen_factors(pool, med_w)
+    print(f"  通过筛选: {len(screened)}/{len(pool.columns)}")
+    if len(screened) == 0:
+        print("  ⚠ 无因子通过筛选!")
+        return {}
+    for _, r in screened.iterrows():
+        print(f"    {r['factor']:20s} | freq={r['freq']:.1%} | E={r['e_cond']:+.1f}% | Uplift={r['uplift']:+.1f}% | CI=[{r['uplift_ci_low']:+.1f}%,{r['uplift_ci_high']:+.1f}%]")
+
+    # 阶段3
+    print("\n[阶段3] 条件概率去重...")
+    final = deduplicate_factors(pool, screened)
+    print(f"  去重后: {len(final)}/{len(screened)}")
+    print(f"  入选: {final}")
+
+    # 阶段4
+    print("\n[阶段4] 评分卡赋权...")
+    scoring = build_scoring_card(screened, final)
+    for _, r in scoring.iterrows():
+        print(f"    {r['factor']:20s} | Uplift={r['uplift']:+.1f}% | 得分={r['final_score']:.1f}")
+
+    # 阶段5
+    print("\n[阶段5] 阈值滑动寻优...")
+    threshold_df = threshold_optimization(pool, scoring, med_w)
+    # 找最优: 独立机会 >=5 且 uplift CI下限最高的
+    candidates = threshold_df[(threshold_df["n_independent"] >= 5)]
+    if len(candidates) > 0:
+        best = candidates.sort_values("uplift_ci_low", ascending=False).iloc[0]
+        print(f"  最优阈值: {best['threshold']} (机会={int(best['n_independent'])}, Uplift={best['uplift']:+.1f}%)")
+    print("\n" + threshold_df.to_string(index=False))
+
+    return {
+        "pool": pool,
+        "screened": screened,
+        "final_factors": final,
+        "scoring": scoring,
+        "threshold_analysis": threshold_df,
+    }
+
+```
+---
+
+## 核心:V5.1检测器+S3/V1水位线
 `src/models/turning_points.py`
 ```python
 """
@@ -850,18 +1219,19 @@ class TurningPointDetector:
 
 
 class V5Detector:
-    """V5.0 优化版探测器: 评分卡加权, 数据驱动阈值"""
+    """V5.0 优化版探测器: 3因子评分卡 (偏度4.5 + 融资背离3.0 + 估值冰点2.5)"""
 
-    V5_SCORECARD = {"M1_skew_neg": 6.0, "V1_price_5y_low": 4.0}
-    V5_THRESHOLD = 5.5
+    V5_SCORECARD = {"M1_skew_neg": 4.5, "S3_margin_diverge": 3.0, "V1_price_5y_low": 2.5}
+    V5_THRESHOLD = 3.5  # 历史8次独立机会, Uplift +8.5%, CI [+3.8%,+13.9%]
 
     def __init__(self):
         pass
 
-    def compute(self, med_w: pd.Series) -> pd.DataFrame:
+    def compute(self, med_w: pd.Series, vol_w: pd.Series = None,
+                margin_w: pd.Series = None) -> pd.DataFrame:
         from src.models.factor_optimizer import build_factor_pool, _rsi_wilder, _macd_histogram
 
-        pool = build_factor_pool(med_w)
+        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
         df = pd.DataFrame(index=med_w.index)
         df["price"] = med_w
         df["rsi"] = _rsi_wilder(med_w, 14)
@@ -870,21 +1240,17 @@ class V5Detector:
         df["val_pct_5y"] = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
         df["vol_annual"] = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
 
-        # V5 评分
         df["score"] = 0.0
         for f, w in self.V5_SCORECARD.items():
             if f in pool.columns:
                 df["score"] += pool[f] * w
         df["score"] = df["score"].round(1)
 
-        # 规则详细状态
         df["rule_M1"] = pool.get("M1_skew_neg", pd.Series(0, index=df.index))
         df["rule_V1"] = pool.get("V1_price_5y_low", pd.Series(0, index=df.index))
+        df["rule_S3"] = pool.get("S3_margin_diverge", pd.Series(0, index=df.index))
 
-        # 信号
         df["armed"] = (df["score"] >= self.V5_THRESHOLD).astype(int)
-
-        # 右侧确认
         df["macd_hist"] = _macd_histogram(med_w)
         df["macd_stable"] = (df["macd_hist"] >= df["macd_hist"].shift(1)).astype(int)
         df["above_ma2"] = (med_w > med_w.rolling(2).mean()).astype(int)
@@ -1206,425 +1572,61 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
 # ═══════════════════════════════════════════
 
 def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
-    """计算当前价格距离 Rule D (回撤) 和 Rule C (估值) 触发的绝对价位差距"""
+    """计算当前价格距离 S3 (新低背离) 和 V1 (估值冰点) 触发的价位差距"""
     latest = df.iloc[-1]
     curr_price = latest['price']
 
-    # Rule D: 13周回撤 < -10%
-    max_13w = med_w.rolling(13).max().iloc[-1]
-    trigger_d = max_13w * 0.90
-    dd_val = (curr_price / max_13w - 1) * 100
-    triggered_d = dd_val < -10
-    pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
-
-    # Rule C: 5年分位 < 15%
-    if len(med_w) >= 52:
-        trigger_c = med_w.tail(260).quantile(0.15)
+    # S3 (融资背离触发底线): 跌破过去12周最低点 = 创13周新低
+    if len(med_w) >= 13:
+        trigger_s3 = med_w.iloc[-13:-1].min()
     else:
-        trigger_c = np.nan
-    triggered_c = curr_price < trigger_c if not np.isnan(trigger_c) else False
-    pct_away_c = (trigger_c / curr_price - 1) * 100 if not triggered_c and not np.isnan(trigger_c) else 0.0
+        trigger_s3 = np.nan
+    triggered_s3 = bool(latest.get('rule_S3', 0))
+    pct_away_s3 = (trigger_s3 / curr_price - 1) * 100 if not triggered_s3 and not np.isnan(trigger_s3) else 0.0
+
+    # V1 (5年分位 < 15%): 过去260周价格的 15% 分位数 = 估值触发底线
+    if len(med_w) >= 52:
+        trigger_v1 = med_w.tail(260).quantile(0.15)
+    else:
+        trigger_v1 = np.nan
+    triggered_v1 = bool(latest.get('rule_V1', 0))
+    pct_away_v1 = (trigger_v1 / curr_price - 1) * 100 if not triggered_v1 and not np.isnan(trigger_v1) else 0.0
 
     return {
-        "D": {
-            "name": "深度回撤(Rule D)", "triggered": triggered_d,
-            "current": curr_price, "trigger_price": trigger_d, "pct_away": pct_away_d,
+        "S3": {
+            "name": "新低背离(S3)", "triggered": triggered_s3,
+            "current": curr_price, "trigger_price": trigger_s3, "pct_away": pct_away_s3,
         },
-        "C": {
-            "name": "极度便宜(Rule C)", "triggered": triggered_c,
-            "current": curr_price, "trigger_price": trigger_c, "pct_away": pct_away_c,
+        "V1": {
+            "name": "估值冰点(V1)", "triggered": triggered_v1,
+            "current": curr_price, "trigger_price": trigger_v1, "pct_away": pct_away_v1,
         },
     }
 
 
-def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
-    """根据 Score 变化和距离阈值的远近，判断当天的报警级别"""
+def alert_level(df: pd.DataFrame, prev_score: float | None = None) -> dict:
+    """智能报警级别 (V5.1: 阈值 3.5)"""
     latest = df.iloc[-1]
-    curr_score = int(latest['score'])
-    if prev_score is None:
-        prev_score = curr_score
-
+    curr_score = float(latest['score'])
+    if prev_score is None: prev_score = curr_score
     dist = distance_to_trigger(df, df['price'])
 
-    # 状态翻转：昨天还没到击球区，今天盘中跌出了机会
-    if curr_score >= 2 and prev_score < 2:
+    if curr_score >= 3.5 and prev_score < 3.5:
         return {"level": "red",
-                "message": f"状态翻转！Score从 {prev_score} 突升至 {curr_score}/5！极值击球区出现！"}
-    # 持续在底部
-    elif curr_score >= 2:
+                "message": f"状态翻转！Score {prev_score} → {curr_score}！极值击球区！"}
+    elif curr_score >= 3.5:
         return {"level": "red",
-                "message": f"持续处于 Armed 状态 (Score {curr_score}/5)，按计划分批买入。"}
-    # 常态区，检查是否接近触发
+                "message": f"Armed (Score {curr_score})，按计划分批买入。"}
     else:
-        d_away = abs(dist['D']['pct_away']) if not dist['D']['triggered'] else 999
-        c_away = abs(dist['C']['pct_away']) if not dist['C']['triggered'] else 999
-        min_away = min(d_away, c_away)
+        s3_away = abs(dist['S3']['pct_away']) if not dist['S3']['triggered'] else 999
+        v1_away = abs(dist['V1']['pct_away']) if not dist['V1']['triggered'] else 999
+        min_away = min(s3_away, v1_away)
         if min_away <= 2.5:
             return {"level": "yellow",
-                    "message": f"临界预警！距底部极值线仅差 {min_away:.1f}%，随时可能触发，请备好资金。"}
+                    "message": f"临界预警！距极值线仅 {min_away:.1f}%，备好资金。"}
         else:
             return {"level": "silent",
-                    "message": "常态区间。未见极值错杀，安心生活。"}
-
-```
----
-
-## 核心:五阶段因子优化
-`src/models/factor_optimizer.py`
-```python
-"""
-V5.0 因子自动筛选与赋权框架
-
-五阶段:
-  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney, 二值化, 无look-ahead)
-  2. 单因子三漏斗检验 (稀疏度2-15% + 收益>5% + Uplift CI下限>1%)
-  3. 条件概率去重 (P(A|B)>0.65则保留Uplift下限更高的)
-  4. Uplift驱动离散评分卡 (0.5步长, 满分10)
-  5. 阈值滑动寻优 (平衡Uplift与独立机会数)
-"""
-import pandas as pd
-import numpy as np
-from scipy.stats import percentileofscore
-
-
-# ═══════════════════════════════════════════
-# 阶段1: 候选因子池
-# ═══════════════════════════════════════════
-
-def build_factor_pool(med_w: pd.Series) -> pd.DataFrame:
-    """
-    构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
-
-    Returns: DataFrame(index=med_w.index, columns=因子名, values=0/1)
-    """
-    pool = pd.DataFrame(index=med_w.index)
-
-    # ── 维度1: 估值 (Valuation) ──
-    # V1: 5年价格分位 < 15% (极度便宜)
-    pool["V1_price_5y_low"] = (
-        med_w.rolling(260, min_periods=52).rank(pct=True) < 0.15
-    ).astype(int)
-
-    # V2: 价格距52周低点 < 5% (接近一年低点)
-    ll_52w = med_w.rolling(52).min()
-    pool["V2_near_52w_low"] = ((med_w / ll_52w - 1) < 0.05).astype(int)
-
-    # V3: 连续下跌 > 8周 (长期阴跌后的估值修复概率高)
-    down_streak = (med_w.pct_change() < 0).astype(int)
-    pool["V3_down_8w"] = (down_streak.rolling(8).sum() >= 7).astype(int)
-
-    # ── 维度2: 量价冰点 (Liquidity) ──
-    # L1: 周线RSI Wilder < 30
-    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
-
-    # L2: 13周最大回撤 < -12% (加深阈值, 比V3的-10%更严)
-    pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
-
-    # L3: 波动率收缩 < 过去2年25分位 (暴风雨前的宁静)
-    vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
-    pool["L3_vol_shrink"] = (
-        vol < vol.rolling(104, min_periods=52).quantile(0.25)
-    ).astype(int)
-
-    # ── 维度3: 动能衰竭 (Momentum) ──
-    # M1: 收益偏度 < -1.5 (极端左尾, 比之前-1更严)
-    skew = med_w.pct_change().rolling(13).skew()
-    pool["M1_skew_neg"] = (skew < -1.5).astype(int)
-
-    # M2: 4周累计跌幅 > 8% (加速下跌)
-    pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
-
-    # M3: MACD 柱状线创13周新低
-    macd_hist = _macd_histogram(med_w)
-    pool["M3_macd_low"] = (
-        macd_hist < macd_hist.rolling(13).min()
-    ).astype(int)
-
-    # ── 维度4: 资金背离 (Smart Money) ──
-    # S1: 价格跌但RSI不创新低 (底背离)
-    ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
-    pool["S1_divergence"] = (
-        (pool["V2_near_52w_low"] == 1) &
-        (_rsi_wilder(med_w, 14) > ll_rsi + 5)
-    ).astype(int)
-
-    # S2: 下跌放缓 (本周跌幅 < 前4周平均跌幅)
-    weekly_ret = med_w.pct_change() * 100
-    avg_down_4w = weekly_ret.rolling(4).mean()
-    pool["S2_down_slowing"] = (
-        (weekly_ret < 0) & (weekly_ret > avg_down_4w)
-    ).astype(int)
-
-    return pool.fillna(0).astype(int)
-
-
-def _rsi_wilder(close, period=14):
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = (-delta).clip(lower=0)
-    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
-
-
-def _macd_histogram(close, fast=12, slow=26, signal=9):
-    ef = close.ewm(span=fast, adjust=False).mean()
-    es = close.ewm(span=slow, adjust=False).mean()
-    return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
-
-
-# ═══════════════════════════════════════════
-# 阶段2: 单因子三漏斗检验
-# ═══════════════════════════════════════════
-
-def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
-    """Bootstrap 95% CI for mean"""
-    if len(data) < 4:
-        return (np.nan, np.nan)
-    rng = np.random.RandomState(seed)
-    means = []
-    n = len(data)
-    for _ in range(n_iter):
-        idx = rng.choice(n, size=n, replace=True)
-        means.append(np.mean(data[idx]))
-    means = np.array(means)
-    return (np.percentile(means, 2.5), np.percentile(means, 97.5))
-
-
-def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
-                   forward_weeks: int = 13) -> pd.DataFrame:
-    """
-    三漏斗检验：稀疏度 → 收益 → 置信度
-    """
-    n_total = len(pool)
-    # 无条件13周期望收益
-    all_rets = np.array([
-        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-        for i in range(n_total - forward_weeks)
-    ])
-    e_uncond = np.mean(all_rets)
-
-    results = []
-    for col in pool.columns:
-        triggered = pool[col] == 1
-        n_triggered = triggered.sum()
-
-        # 漏斗1: 稀疏度 2%-15%
-        freq = n_triggered / n_total
-        if freq < 0.02 or freq > 0.15:
-            continue
-
-        # 漏斗2: 条件期望收益 > 5%
-        fwd_rets = []
-        for i in range(n_total - forward_weeks):
-            if triggered.iloc[i]:
-                fwd_rets.append(
-                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-                )
-        fwd_rets = np.array(fwd_rets)
-        e_cond = np.mean(fwd_rets)
-        if e_cond <= 5.0:
-            continue
-
-        # 漏斗3: Uplift CI下限 > 1%
-        uplift_vals = fwd_rets - e_uncond
-        ci_low, ci_high = bootstrap_ci(uplift_vals)
-        if np.isnan(ci_low) or ci_low <= 1.0:
-            continue
-
-        results.append({
-            "factor": col,
-            "dimension": col[:2],  # V/L/M/S
-            "freq": freq,
-            "e_cond": e_cond,
-            "e_uncond": e_uncond,
-            "uplift": e_cond - e_uncond,
-            "uplift_ci_low": ci_low,
-            "uplift_ci_high": ci_high,
-            "n_signals": n_triggered,
-        })
-
-    return pd.DataFrame(results).sort_values("uplift_ci_low", ascending=False)
-
-
-# ═══════════════════════════════════════════
-# 阶段3: 条件概率去重
-# ═══════════════════════════════════════════
-
-def deduplicate_factors(pool: pd.DataFrame, screened: pd.DataFrame,
-                         corr_threshold: float = 0.65) -> list:
-    """条件概率去重：P(A|B)>0.65 则保留Uplift CI下限更高的"""
-    survivors = screened["factor"].tolist()
-    removed = []
-
-    for i in range(len(survivors)):
-        if survivors[i] in removed:
-            continue
-        for j in range(i + 1, len(survivors)):
-            if survivors[j] in removed:
-                continue
-            a, b = survivors[i], survivors[j]
-            # P(A=1 | B=1)
-            b_true = pool[pool[b] == 1]
-            p_a_given_b = b_true[a].mean() if len(b_true) > 0 else 0
-            p_b_given_a = pool[pool[a] == 1][b].mean() if (pool[a]==1).sum() > 0 else 0
-
-            if max(p_a_given_b, p_b_given_a) > corr_threshold:
-                # 保留 Uplift CI 下限更高的
-                ci_a = screened[screened["factor"] == a]["uplift_ci_low"].values[0]
-                ci_b = screened[screened["factor"] == b]["uplift_ci_low"].values[0]
-                if ci_a >= ci_b:
-                    removed.append(b)
-                else:
-                    removed.append(a)
-
-    return [f for f in survivors if f not in removed]
-
-
-# ═══════════════════════════════════════════
-# 阶段4: Uplift驱动评分卡
-# ═══════════════════════════════════════════
-
-def build_scoring_card(screened: pd.DataFrame, final_factors: list,
-                        max_score: float = 10.0) -> pd.DataFrame:
-    """
-    按Uplift贡献度分配权重，离散化到0.5步长。
-    """
-    sub = screened[screened["factor"].isin(final_factors)].copy()
-    total_uplift = sub["uplift"].sum()
-    sub["raw_weight"] = sub["uplift"] / total_uplift
-    sub["raw_score"] = sub["raw_weight"] * max_score
-    sub["discrete_score"] = (sub["raw_score"] * 2).round() / 2  # 四舍五入到0.5
-    # 确保不低于0.5
-    sub["discrete_score"] = sub["discrete_score"].clip(lower=0.5)
-    # 总分归一化到max_score
-    scale = max_score / sub["discrete_score"].sum()
-    sub["final_score"] = (sub["discrete_score"] * scale * 2).round() / 2
-    return sub[["factor", "dimension", "uplift", "uplift_ci_low",
-                "raw_weight", "final_score"]].sort_values("final_score", ascending=False)
-
-
-# ═══════════════════════════════════════════
-# 阶段5: 阈值滑动寻优
-# ═══════════════════════════════════════════
-
-def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
-                           med_w: pd.Series, forward_weeks: int = 13) -> pd.DataFrame:
-    """
-    滑动阈值, 输出每个阈值下的Uplift和独立机会数。
-    """
-    # 计算加权总分
-    total_score = pd.Series(0, index=pool.index, dtype=float)
-    for _, row in scoring.iterrows():
-        f = row["factor"]
-        if f in pool.columns:
-            total_score += pool[f] * row["final_score"]
-
-    n_total = len(pool)
-    all_rets = np.array([
-        (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-        for i in range(n_total - forward_weeks)
-    ])
-    e_uncond = np.mean(all_rets)
-
-    # 去重叠信号
-    def count_independent(triggered: np.ndarray, min_gap: int = 4) -> int:
-        dates = np.where(triggered)[0]
-        if len(dates) == 0:
-            return 0
-        count = 1
-        last = dates[0]
-        for d in dates[1:]:
-            if d - last >= min_gap:
-                count += 1
-                last = d
-        return count
-
-    results = []
-    thresholds = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0]
-    for thresh in thresholds:
-        triggered = (total_score >= thresh).values
-        n_independent = count_independent(triggered)
-
-        fwd_rets = []
-        for i in range(n_total - forward_weeks):
-            if triggered[i]:
-                fwd_rets.append(
-                    (med_w.iloc[i + forward_weeks] / med_w.iloc[i] - 1) * 100
-                )
-        fwd_rets = np.array(fwd_rets)
-        e_cond = np.mean(fwd_rets) if len(fwd_rets) > 0 else np.nan
-        uplift = e_cond - e_uncond if not np.isnan(e_cond) else np.nan
-        ci_low, ci_high = bootstrap_ci(fwd_rets) if len(fwd_rets) >= 4 else (np.nan, np.nan)
-
-        results.append({
-            "threshold": thresh,
-            "n_independent": n_independent,
-            "n_raw": int(triggered.sum()),
-            "e_cond": e_cond,
-            "uplift": uplift,
-            "uplift_ci_low": ci_low,
-            "uplift_ci_high": ci_high,
-        })
-
-    return pd.DataFrame(results)
-
-
-# ═══════════════════════════════════════════
-# 一键运行
-# ═══════════════════════════════════════════
-
-def run_full_pipeline(med_w: pd.Series) -> dict:
-    """执行完整五阶段优化, 返回所有结果"""
-    print("=" * 60)
-    print("  V5.0 因子自动筛选与赋权框架")
-    print("=" * 60)
-
-    # 阶段1
-    print("\n[阶段1] 构建候选因子池...")
-    pool = build_factor_pool(med_w)
-    print(f"  候选因子: {len(pool.columns)} 个")
-
-    # 阶段2
-    print("\n[阶段2] 单因子三漏斗检验...")
-    screened = screen_factors(pool, med_w)
-    print(f"  通过筛选: {len(screened)}/{len(pool.columns)}")
-    if len(screened) == 0:
-        print("  ⚠ 无因子通过筛选!")
-        return {}
-    for _, r in screened.iterrows():
-        print(f"    {r['factor']:20s} | freq={r['freq']:.1%} | E={r['e_cond']:+.1f}% | Uplift={r['uplift']:+.1f}% | CI=[{r['uplift_ci_low']:+.1f}%,{r['uplift_ci_high']:+.1f}%]")
-
-    # 阶段3
-    print("\n[阶段3] 条件概率去重...")
-    final = deduplicate_factors(pool, screened)
-    print(f"  去重后: {len(final)}/{len(screened)}")
-    print(f"  入选: {final}")
-
-    # 阶段4
-    print("\n[阶段4] 评分卡赋权...")
-    scoring = build_scoring_card(screened, final)
-    for _, r in scoring.iterrows():
-        print(f"    {r['factor']:20s} | Uplift={r['uplift']:+.1f}% | 得分={r['final_score']:.1f}")
-
-    # 阶段5
-    print("\n[阶段5] 阈值滑动寻优...")
-    threshold_df = threshold_optimization(pool, scoring, med_w)
-    # 找最优: 独立机会 >=5 且 uplift CI下限最高的
-    candidates = threshold_df[(threshold_df["n_independent"] >= 5)]
-    if len(candidates) > 0:
-        best = candidates.sort_values("uplift_ci_low", ascending=False).iloc[0]
-        print(f"  最优阈值: {best['threshold']} (机会={int(best['n_independent'])}, Uplift={best['uplift']:+.1f}%)")
-    print("\n" + threshold_df.to_string(index=False))
-
-    return {
-        "pool": pool,
-        "screened": screened,
-        "final_factors": final,
-        "scoring": scoring,
-        "threshold_analysis": threshold_df,
-    }
+                    "message": "常态区间。"}
 
 ```
 ---
@@ -2132,7 +2134,7 @@ class FREDSource:
 ```
 ---
 
-## 应用:CLI跟踪器(V5)
+## 应用:CLI跟踪器(V5.1+融资)
 `app/tracker.py`
 ```python
 """
@@ -2158,9 +2160,10 @@ except ImportError:
 def _load_data() -> dict:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from src.data_fetcher.akshare_source import AKShareSource
-    # 极速模式: 只拉医药指数, 跳过宏观慢速接口 (14s → <1s)
-    med_df = AKShareSource().fetch_sw_medical("20180101")
-    return {"sw_medical": med_df}
+    ak_src = AKShareSource()
+    med_df = ak_src.fetch_sw_medical("20180101")
+    margin_df = ak_src.fetch_margin_data("20180101")
+    return {"sw_medical": med_df, "total_margin": margin_df}
 
 
 def _compute(data: dict, custom_price: float = None) -> dict:
@@ -2174,14 +2177,21 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     if custom_price is not None and len(med_w) > 0:
         med_w.iloc[-1] = custom_price
 
+    # 融资数据 (T+1时滞)
+    margin_w = None
+    if "total_margin" in data and not data["total_margin"].empty:
+        mdf = data["total_margin"].set_index("date")["value"].sort_index()
+        margin_w = mdf.resample("W-FRI").last().dropna().shift(1)
+
     det = V5Detector()
-    df = det.compute(med_w)
+    df = det.compute(med_w, margin_w=margin_w)
     latest = df.iloc[-1]
 
-    # V5 评分卡因子
+    # V5.1 三因子评分卡
     rule_defs = [
-        ("rule_M1", "M1:偏度异常", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾 (6.0分)"),
-        ("rule_V1", "V1:估值冰点", f"{latest['val_pct_5y']:.0f}%", "< 15%", "历史低位 (4.0分)"),
+        ("rule_M1", "M1:偏度异常(4.5分)", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾恐慌"),
+        ("rule_S3", "S3:融资背离(3.0分)", "已触发" if latest.get("rule_S3",0) else "未触发", "价新低+融资增", "聪明钱抄底"),
+        ("rule_V1", "V1:估值冰点(2.5分)", f"{latest['val_pct_5y']:.0f}%", "< 15%分位", "历史低位区域"),
     ]
     rules_status = []
     for col, name, val, thresh, desc in rule_defs:
@@ -2269,7 +2279,7 @@ def run_cli():
     # Distance to trigger
     print(f"\n  距离触发:")
     dist = sig["distance_to_trigger"]
-    for key in ["D", "C"]:
+    for key in ["S3", "V1"]:
         d = dist[key]
         if d["triggered"]:
             print(f"    {d['name']}: 已触发")
@@ -2335,7 +2345,7 @@ if __name__ == "__main__":
 ```
 ---
 
-## 应用:HTML看板(V5+试算)
+## 应用:HTML看板(V5.1+S3/V1水位线)
 `app/dashboard.py`
 ```python
 """生成自包含 HTML 看板 — 图表库首次下载缓存，之后离线可用"""
@@ -2401,14 +2411,14 @@ def build_dashboard(output_path: str = "dashboard.html"):
     med_w = med.resample("W-FRI").last().dropna()
 
     det = V5Detector()
-    df = det.compute(med_w)
+    df = det.compute(med_w, vol_w=None, margin_w=None)
     latest = df.iloc[-1]
 
     score = float(latest["score"])
-    if score < 4:        pct, label, color = 0, "观望 (0%)", "#9CA3AF"
-    elif score < 5.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
-    elif score < 6.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
-    else:                pct, label, color = 60, "重仓 60% — 双因子触发", "#EF4444"
+    if score < 2.5:      pct, label, color = 0, "观望 (0%)", "#9CA3AF"
+    elif score < 3.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
+    elif score < 5.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
+    else:                pct, label, color = 60, "重仓 60% — 多因子触发", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
@@ -2422,8 +2432,9 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
     rule_defs = [
-        ("M1:偏度异常(6.0分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
-        ("V1:估值冰点(4.0分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
+        ("M1:偏度异常(4.5分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
+        ("S3:融资背离(3.0分)", bool(latest.get("rule_S3",0)), "融资+价格新低", "融资逆势加仓"),
+        ("V1:估值冰点(2.5分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
     ]
     rules_html = ""
     for name, ok, val, thresh in rule_defs:
@@ -2439,11 +2450,11 @@ def build_dashboard(output_path: str = "dashboard.html"):
         if not bool(r["armed"]): continue
         d = r.name; first = bool(collapsed.iloc[i])
         armed_html += f"""<tr class="{'first-signal' if first else ''}">
-    <td>{d.strftime('%Y-%m-%d')}</td><td>{int(r['score'])}/5</td><td>{r['price']:.0f}</td>
+    <td>{d.strftime('%Y-%m-%d')}</td><td>{float(r['score']):.1f}</td><td>{r['price']:.0f}</td>
     <td>{r['rsi']:.1f}</td><td>{r['drawdown_13w']:.1f}%</td><td>{'*' if first else ''}</td></tr>"""
 
     waterline_html = ""
-    for key, emoji in [("D",""),("C","")]:
+    for key, emoji in [("S3",""),("V1","")]:
         dv = dist[key]
         if dv["triggered"]:
             waterline_html += f'<div style="padding:6px 12px;background:#f0fdf4;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 已触发</div>'
@@ -2451,7 +2462,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
             waterline_html += f'<div style="padding:6px 12px;background:#fefce8;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 触发价 <b>{dv["trigger_price"]:.0f}</b> (距当前 {dv["pct_away"]:+.1f}%)</div>'
 
     waterline_prices = {}
-    for key in ["D", "C"]:
+    for key in ["S3", "V1"]:
         if not dist[key]["triggered"] and dist[key].get("trigger_price") and not np.isnan(dist[key]["trigger_price"]):
             waterline_prices[key] = dist[key]["trigger_price"]
 
@@ -2529,8 +2540,8 @@ try {{
     }});
     line.setData(prices); line.setMarkers(markers);
     var waterlines = {waterline_json};
-    var colors = {{ 'D': '#EF4444', 'C': '#10B981' }};
-    var labels = {{ 'D': '回撤触发', 'C': '估值触发' }};
+    var colors = {{ 'S3': '#EF4444', 'V1': '#10B981' }};
+    var labels = {{ 'S3': '新低触发', 'V1': '估值触发' }};
     Object.keys(waterlines).forEach(function(key) {{
         var price = waterlines[key];
         var wl = chart.addLineSeries({{ color: colors[key], lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }});
@@ -3375,6 +3386,66 @@ if __name__ == "__main__":
     dry = "--dry-run" in sys.argv
     test = "--test" in sys.argv
     run(dry_run=dry, test_push=test)
+
+```
+---
+
+## 工具:一键运行五阶段优化
+`run_v5_optimizer.py`
+```python
+"""
+V5.0 全量因子自动优化 — 注入高阶数据, 重跑五阶段
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import pandas as pd
+import numpy as np
+
+print("\n" + "=" * 60)
+print("  V5.0 因子引擎 — 注入高阶 Alpha 数据")
+print("=" * 60)
+
+# 1. 拉取全量数据
+print("\n[1/2] 拉取底层数据 (指数+融资)...")
+from src.data_fetcher.akshare_source import AKShareSource
+data = AKShareSource().fetch_all("20180101")
+
+# 2. 周频聚合
+med_df = data["sw_medical"].set_index("date")
+med_w = med_df["close"].sort_index().resample("W-FRI").last().dropna()
+vol_w = None
+if "volume" in med_df.columns:
+    vol_w = med_df["volume"].sort_index().resample("W-FRI").sum().dropna()
+
+pe_w = None
+if "medical_pe" in data and not data["medical_pe"].empty:
+    pe_df = data["medical_pe"].set_index("date")["value"]
+    pe_w = pe_df.sort_index().resample("W-FRI").last().dropna()
+
+margin_w = None
+if "total_margin" in data and not data["total_margin"].empty:
+    margin_df = data["total_margin"].set_index("date")["value"]
+    margin_w = margin_df.sort_index().resample("W-FRI").last().dropna()
+    margin_w = margin_w.shift(1)  # T+1 发布时滞
+
+print(f"  周线: {len(med_w)} 周 | 成交量: {'OK' if vol_w is not None else 'N/A'} | PE: {'OK' if pe_w is not None else 'N/A'} | 融资: {'OK' if margin_w is not None else 'N/A'}")
+
+# 3. 注入优化器, 执行全量流程
+print("\n[2/2] 五阶段漏斗筛选 + 评分卡赋权 + 阈值寻优...")
+from src.models.factor_optimizer import run_full_pipeline
+results = run_full_pipeline(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w)
+
+if results:
+    scoring = results.get("scoring")
+    threshold_df = results.get("threshold_analysis")
+    if scoring is not None and len(scoring) > 0:
+        print("\n" + "=" * 60)
+        print("  最终评分卡")
+        print("=" * 60)
+        for _, r in scoring.iterrows():
+            print(f"  {r['factor']:25s} | {r['final_score']:.1f} 分 | Uplift={r['uplift']:+.1f}%")
 
 ```
 ---
