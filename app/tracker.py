@@ -21,7 +21,9 @@ except ImportError:
 def _load_data() -> dict:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from src.data_fetcher.akshare_source import AKShareSource
-    return AKShareSource().fetch_all("2018-01-01")
+    # 极速模式: 只拉医药指数, 跳过宏观慢速接口 (14s → <1s)
+    med_df = AKShareSource().fetch_sw_medical("20180101")
+    return {"sw_medical": med_df}
 
 
 def _compute(data: dict, custom_price: float = None) -> dict:
