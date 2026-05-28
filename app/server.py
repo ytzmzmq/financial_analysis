@@ -421,9 +421,11 @@ def _compute_and_serialize(custom_price: float = None) -> dict:
     from app.tracker import _compute
     from src.data_fetcher.akshare_source import AKShareSource
 
-    # 极速模式: 只拉取医药指数, 跳过宏观数据 (14s → <1s)
-    med_df = AKShareSource().fetch_sw_medical("20180101")
-    fast_data = {"sw_medical": med_df}
+    # 极速模式: 拉取医药指数+融资数据 (S3因子需要资金面)
+    ak_src = AKShareSource()
+    med_df = ak_src.fetch_sw_medical("20180101")
+    margin_df = ak_src.fetch_margin_data("20180101")
+    fast_data = {"sw_medical": med_df, "total_margin": margin_df}
 
     sig = _compute(fast_data, custom_price=custom_price)
 
