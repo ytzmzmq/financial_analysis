@@ -29,26 +29,8 @@ class AKShareSource:
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-        # 2. 用 512290(生物医药ETF) 盘中涨跌幅推算指数实时点位
-        try:
-            today = pd.Timestamp.today().normalize()
-            if today.weekday() < 5:
-                spot_df = ak.fund_etf_spot_em()
-                etf = spot_df[spot_df["代码"] == "512290"]
-                if not etf.empty:
-                    pct_change = float(etf["涨跌幅"].iloc[0]) / 100.0
-                    # 只在日线还未更新今天数据时(盘中)，才用昨天收盘价推算
-                    if df.iloc[-1]["date"] < today:
-                        last_close = df.iloc[-1]["close"]
-                        realtime_price = last_close * (1 + pct_change)
-                        new_row = {"date": today, "close": realtime_price, "open": realtime_price,
-                                   "high": realtime_price, "low": realtime_price,
-                                   "volume": 0, "amount": 0}
-                        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                        print(f"[AKShare] ETF代理: 512290盘中涨跌{pct_change*100:+.2f}% → 指数盘中估算 {realtime_price:.2f}")
-                    # 如果df里已有今天数据(收盘后)，保持原样不动
-        except Exception:
-            pass  # 网络不佳则静默退回历史数据
+        # 注: 实时点位请直接访问申万官网 https://www.swsresearch.com 搜索 801150
+        # AKShare 当前版本的 index_realtime_sw 存在内部 bug，待升级后启用
 
         if end_date is None:
             end_date = pd.Timestamp.now().strftime("%Y%m%d")

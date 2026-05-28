@@ -70,13 +70,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
         weekly_data.append({"time": r.name.strftime("%Y-%m-%d"), "value": round(float(r["price"]), 2),
                             "armed": bool(r["armed"]), "score": int(r["score"])})
 
-    daily_recent = med[med.index > df.index[-1]]
-    for d, p in daily_recent.items():
-        weekly_data.append({"time": d.strftime("%Y-%m-%d"), "value": round(float(p), 2),
-                            "armed": False, "score": 0})
-
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
-    daily_latest_str = med.index[-1].strftime("%Y-%m-%d") if len(med) > 0 else data_date_str
 
     rule_defs = [
         ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30", "短期动能衰竭"),
@@ -133,7 +127,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 <div class="container">
 <div class="header">
   <h1>医药板块 风险收益比监控器</h1>
-  <p>申万医药生物(801150) | 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')} | 指标至 {data_date_str} | 日线至 {daily_latest_str} | AKShare</p>
+  <p>申万医药生物(801150) | 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')} | 指标至 {data_date_str} | 日线至 {data_date_str} | AKShare</p>
 </div>
 <div class="card"><div class="position-card">
   <div class="pct" style="color:{color}">{pct}%</div>
@@ -141,7 +135,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
   <div style="margin-top:12px"><span class="signal-badge" style="background:{color}">Score {score}/5</span></div>
 </div></div>
 <div class="card"><div class="card-title">关键指标</div><div class="metrics">
-  <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价 ({daily_latest_str})</div></div>
+  <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价 ({data_date_str})</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['rsi']<30 else '#1f2937'}">{latest["rsi"]:.1f}</div><div class="lbl">RSI(14) Wilder</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['drawdown_13w']<-10 else '#1f2937'}">{latest["drawdown_13w"]:.1f}%</div><div class="lbl">13周最大回撤</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['val_pct_5y']<15 else '#1f2937'}">{latest["val_pct_5y"]:.0f}%</div><div class="lbl">5年价格分位</div></div>
