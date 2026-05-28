@@ -147,6 +147,11 @@ def build_dashboard(output_path: str = "dashboard.html"):
   <div class="pct" style="color:{color}">{pct}%</div>
   <div class="label">{label}</div>
   <div style="margin-top:12px"><span class="signal-badge" style="background:{color}">Score {score}/5</span></div>
+  <div style="margin-top:10px;display:flex;justify-content:center;gap:8px">
+    <input type="number" id="trial-price" placeholder="试算点位(如7400)" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;width:150px;font-size:13px">
+    <button onclick="trialCalc()" style="padding:6px 14px;background:#3B82F6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">试算</button>
+    <span id="trial-result" style="font-size:13px;color:#6b7280;align-self:center"></span>
+  </div>
 </div></div>
 <div class="card"><div class="card-title">关键指标 ({data_date_str})</div><div class="metrics">
   <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价</div></div>
@@ -204,6 +209,19 @@ try {{
 }} catch(e) {{
     document.getElementById('chart').innerHTML =
         '<div style="padding:40px;text-align:center;color:#ef4444"><b>图表加载失败</b><br><small>'+e.message+'</small></div>';
+}}
+async function trialCalc() {{
+  var price = document.getElementById('trial-price').value;
+  var res = document.getElementById('trial-result');
+  if (!price) {{ res.textContent = '请输入点位'; return; }}
+  res.textContent = '计算中...';
+  try {{
+    var r = await fetch('/api/signal?price=' + price);
+    var d = await r.json();
+    res.innerHTML = 'Score <b>' + d.score + '/5</b> | ' + d.status +
+      ' | D触发价:' + (d.d_trigger||'—') + ' C触发价:' + (d.c_trigger||'—');
+    res.style.color = d.score >= 2 ? '#ef4444' : '#10b981';
+  }} catch(e) {{ res.textContent = '计算失败'; }}
 }}
 </script>
 </body></html>"""

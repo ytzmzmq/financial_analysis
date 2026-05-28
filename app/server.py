@@ -504,15 +504,54 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/static/"):
             self._serve_static()
         else:
-            self._serve_html()
+            self._serve_dash()
 
-    def _serve_html(self):
-        body = HTML.encode("utf-8")
+    def _serve_dash(self):
+        import subprocess, sys
+        dash_path = Path("dashboard.html")
+        if not dash_path.exists():
+            subprocess.run([sys.executable, "app/dashboard.py"], capture_output=True)
+        body = dash_path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_api(self):
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        custom_price = float(qs["price"][0]) if "price" in qs else None
+        print(f"  [{datetime.now():%H:%M:%S}] 计算中...")
+        try:
+            from app.tracker import _compute, _load_data
+            data = _load_data()
+            if custom_price is not None:
+                # 覆盖最后一周价格为试算值
+                med = data["sw_medical"].set_index("date")["close"].sort_index()
+                med_w = med.resample("W-FRI").last().dropna()
+                med_w.iloc[-1] = custom_price
+                data["sw_medical"] = med_w.reset_index().rename(columns={"index":"date",0:"close"})
+                # 让 _compute 使用修改后的数据
+                data["_custom_med_w"] = med_w
+            sig = _compute(data)
+            dist = sig.get("distance_to_trigger", {})
+            payload = {
+                "score": sig["score"],
+                "status": "ARMED" if sig["armed"] else "HOLD",
+                "d_trigger": f'{dist["D"]["trigger_price"]:.0f}' if dist["D"].get("trigger_price") else None,
+                "c_trigger": f'{dist["C"]["trigger_price"]:.0f}' if dist["C"].get("trigger_price") else None,
+            }
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", len(body))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
 
     def _serve_lw(self):
         js_path = Path("data/lightweight-charts.min.js")
