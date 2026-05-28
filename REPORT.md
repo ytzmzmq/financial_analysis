@@ -225,7 +225,7 @@ uplift 在全部测试参数下均稳定在 +7.9%，说明 Armed 的条件收益
 | V4 | 前向收益标签、信号去重、Bootstrap CI、RSI Wilder |
 | **V4.1** | Triple Barrier标签(路径依赖)、条件期望评估、条件概率相关性、Benchmark对照、label clustering |
 | **V4.2** | collapse保留第一条(去前瞻偏差)、Barrier参数敏感性(uplift稳定+7.9%)、fred_source清理死代码+闰年修正 |
-| **V4.3** | Distance-to-Trigger(反推目标价)、三级日度警报(SILENT/YELLOW/RED)、Dashboard水位线图、CI改为每交易日14:45运行 |
+| **V4.3** | Distance-to-Trigger、三级警报(SILENT/YELLOW/RED)、水位线图、CI每交易日14:45、ETF代理实时价格(fund_etf_spot_em+512290)、极速server模式(仅拉医药指数<1s)、试算输入框、Rule C触发价修正(quantile) |
 
 ---
 

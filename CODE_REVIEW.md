@@ -232,7 +232,7 @@ uplift 在全部测试参数下均稳定在 +7.9%，说明 Armed 的条件收益
 | V4 | 前向收益标签、信号去重、Bootstrap CI、RSI Wilder |
 | **V4.1** | Triple Barrier标签(路径依赖)、条件期望评估、条件概率相关性、Benchmark对照、label clustering |
 | **V4.2** | collapse保留第一条(去前瞻偏差)、Barrier参数敏感性(uplift稳定+7.9%)、fred_source清理死代码+闰年修正 |
-| **V4.3** | Distance-to-Trigger(反推目标价)、三级日度警报(SILENT/YELLOW/RED)、Dashboard水位线图、CI改为每交易日14:45运行 |
+| **V4.3** | Distance-to-Trigger、三级警报(SILENT/YELLOW/RED)、水位线图、CI每交易日14:45、ETF代理实时价格(fund_etf_spot_em+512290)、极速server模式(仅拉医药指数<1s)、试算输入框、Rule C触发价修正(quantile) |
 
 ---
 
@@ -659,6 +659,37 @@ financial_analysis/
 ├── .gitignore
 └── data/manual/_template.csv
 ```
+
+## 第八章：实时看板与 ETF 代理（最新）
+
+### 实时看板服务器
+
+创建 `app/server.py`：HTTP 服务器，浏览器打开 `http://127.0.0.1:8888`，F5 刷新即拉取最新数据重新计算。
+
+### ETF 代理实时价格
+
+`fetch_sw_medical` 通过 `ak.fund_etf_spot_em()` 抓取 512290（生物医药ETF）盘中涨跌幅，等比例映射到申万医药指数。周末自动跳过。
+
+### 极速模式
+
+server.py 仅拉取 `sw_medical` 数据（跳过宏观数据），耗时从 14s 降至 <1s。
+
+### 试算功能
+
+网页右上角输入框，输入任意点位（如 7430），点击按钮即基于该价格重新计算 Score 和触发价。
+
+### 图表去重
+
+lightweight-charts 遇重复时间轴会崩溃，前端加 `uniqueData` 去重+排序。
+
+### 近期 Bug 修复
+
+- `collapse_labels` cluster 逻辑错误：`clusters[1:]` → `cluster[1:]`
+- `alert_level` 返回 `"green"` → `"silent"`（notify.py 只识别 silent/yellow/red）
+- Rule C 触发价：`rank().idxmin()` → `quantile(0.15)`
+- ETF 接口：`stock_zh_a_spot_em()` → `fund_etf_spot_em()`
+- tracker 同一天重复追加 history → 按日期去重
+- 日期截断导致本周数据丢失 → 配合 ETF 代理移除截断
 
 ### 核心模块 `turning_points.py` 功能清单
 
@@ -1312,13 +1343,9 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
     triggered_d = bool(latest['rule_dd'])
     pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
 
-    # Rule C (5年分位 < 15%): 用滚动rank反推 — 找到分位=15对应的价格
+    # Rule C (5年分位 < 15%): 过去260周价格的 15% 分位数 = 触发底线
     if len(med_w) >= 52:
-        ranks = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
-        # 反推: 在最近数据中找 rank 最接近 15 的周的价格
-        recent = ranks.tail(26)  # 近半年
-        closest_idx = (recent - 15).abs().idxmin()
-        trigger_c = med_w.loc[closest_idx]
+        trigger_c = med_w.tail(260).quantile(0.15)
     else:
         trigger_c = np.nan
     triggered_c = bool(latest['rule_cheap'])
@@ -1404,14 +1431,15 @@ class AKShareSource:
 
         # 2. 用 512290(生物医药ETF) 盘中涨跌幅推算指数实时点位
         try:
-            spot_df = ak.stock_zh_a_spot_em()
+            today = pd.Timestamp.today().normalize()
+            if today.weekday() >= 5:
+                raise Exception("周末休市, 跳过实时数据")
+            spot_df = ak.fund_etf_spot_em()
             etf = spot_df[spot_df["代码"] == "512290"]
             if not etf.empty:
                 pct_change = float(etf["涨跌幅"].iloc[0]) / 100.0
                 last_close = df.iloc[-1]["close"]
                 realtime_price = last_close * (1 + pct_change)
-
-                today = pd.Timestamp.today().normalize()
                 if df.iloc[-1]["date"] < today:
                     new_row = {"date": today, "close": realtime_price, "open": realtime_price,
                                "high": realtime_price, "low": realtime_price,
@@ -1420,7 +1448,7 @@ class AKShareSource:
                 else:
                     df.loc[df.index[-1], "close"] = realtime_price
                 print(f"[AKShare] ETF代理: 512290涨跌{pct_change*100:+.2f}% → 指数估算 {realtime_price:.2f}")
-        except Exception:
+        except Exception as e:
             pass  # 周末休市或网络不佳，退回历史数据
 
         if end_date is None:
@@ -3031,6 +3059,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="header-meta">
       数据截止 <b id="h-date">—</b><br>
       更新时间 <b id="h-updated">—</b>
+      <div style="margin-top:10px; display:flex; align-items:center; gap:8px; justify-content:flex-end">
+        <input type="number" id="custom-price" placeholder="试算点位(如 7430)"
+               style="padding:6px; border-radius:6px; border:1px solid #374151; background:#1f2937; color:#e2e8f0; width:160px; font-size:12px;">
+        <button onclick="load()" style="padding:6px 12px; background:#38bdf8; color:#000; border:none; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">刷新试算</button>
+      </div>
     </div>
   </div>
 
@@ -3109,7 +3142,10 @@ async function load() {
   document.getElementById('app').style.display = 'none';
 
   try {
-    const r = await fetch('/api/signal');
+    const cpEl = document.getElementById('custom-price');
+    const cp = cpEl ? cpEl.value : '';
+    const url = cp ? '/api/signal?price=' + cp : '/api/signal';
+    const r = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
     const d = await r.json();
     render(d);

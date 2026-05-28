@@ -396,6 +396,37 @@ financial_analysis/
 └── data/manual/_template.csv
 ```
 
+## 第八章：实时看板与 ETF 代理（最新）
+
+### 实时看板服务器
+
+创建 `app/server.py`：HTTP 服务器，浏览器打开 `http://127.0.0.1:8888`，F5 刷新即拉取最新数据重新计算。
+
+### ETF 代理实时价格
+
+`fetch_sw_medical` 通过 `ak.fund_etf_spot_em()` 抓取 512290（生物医药ETF）盘中涨跌幅，等比例映射到申万医药指数。周末自动跳过。
+
+### 极速模式
+
+server.py 仅拉取 `sw_medical` 数据（跳过宏观数据），耗时从 14s 降至 <1s。
+
+### 试算功能
+
+网页右上角输入框，输入任意点位（如 7430），点击按钮即基于该价格重新计算 Score 和触发价。
+
+### 图表去重
+
+lightweight-charts 遇重复时间轴会崩溃，前端加 `uniqueData` 去重+排序。
+
+### 近期 Bug 修复
+
+- `collapse_labels` cluster 逻辑错误：`clusters[1:]` → `cluster[1:]`
+- `alert_level` 返回 `"green"` → `"silent"`（notify.py 只识别 silent/yellow/red）
+- Rule C 触发价：`rank().idxmin()` → `quantile(0.15)`
+- ETF 接口：`stock_zh_a_spot_em()` → `fund_etf_spot_em()`
+- tracker 同一天重复追加 history → 按日期去重
+- 日期截断导致本周数据丢失 → 配合 ETF 代理移除截断
+
 ### 核心模块 `turning_points.py` 功能清单
 
 | 函数/类 | 用途 |
