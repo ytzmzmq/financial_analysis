@@ -1,12 +1,24 @@
-"""生成自包含 HTML 看板 — 浏览器直接打开"""
-import sys
-import json
+"""生成自包含 HTML 看板 — 图表库首次下载缓存，之后离线可用"""
+import sys, json, urllib.request, time
 from pathlib import Path
 from datetime import datetime
-import pandas as pd
-import numpy as np
+import pandas as pd, numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+LW_CACHE = Path("data/lightweight-charts.min.js")
+LW_CDN = "https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"
+
+def _get_lw_js() -> str:
+    """优先读本地缓存，没有则下载一次并缓存"""
+    if LW_CACHE.exists() and LW_CACHE.stat().st_size > 100_000:
+        return LW_CACHE.read_text(encoding="utf-8")
+    print("下载图表库 (仅首次)...")
+    js = urllib.request.urlopen(LW_CDN, timeout=20).read().decode("utf-8")
+    LW_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    LW_CACHE.write_text(js, encoding="utf-8")
+    print(f"已缓存 {LW_CACHE} (后续离线)")
+    return js
 
 CSS = """*{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937;padding:20px}
@@ -40,14 +52,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 def build_dashboard(output_path: str = "dashboard.html"):
     from src.data_fetcher.akshare_source import AKShareSource
     from src.models.turning_points import TurningPointDetector, collapse_signals
-    import time
 
     t0 = time.time()
-    print("极速拉取最新数据...")
+    print("生成看板...")
 
     med_df = AKShareSource().fetch_sw_medical("20180101")
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
+
+    # 检查是否有实时数据
+    has_realtime = med.index[-1].date() == pd.Timestamp.today().date()
+    price_source = "实时" if has_realtime else f"EOD 昨收"
+    price_color = "#10b981" if has_realtime else "#f59e0b"
 
     det = TurningPointDetector()
     df = det.compute(med_w)
@@ -56,10 +72,10 @@ def build_dashboard(output_path: str = "dashboard.html"):
     score = int(latest["score"])
     if score <= 1:       pct, label, color = 0, "观望 (0%)", "#9CA3AF"
     elif score == 2:
-        if bool(latest["right_confirm"]): pct, label, color = 30, "轻仓 30% — Armed + 右侧确认", "#F59E0B"
-        else:                             pct, label, color = 15, "试探仓 15% — Armed, 等右侧确认", "#F59E0B"
-    elif score == 3:     pct, label, color = 50, "半仓 50% — 强信号", "#F97316"
-    else:                pct, label, color = 70, "重仓 70% — 极强信号", "#EF4444"
+        if bool(latest["right_confirm"]): pct, label, color = 30, "轻仓 30%", "#F59E0B"
+        else:                             pct, label, color = 15, "试探仓 15%", "#F59E0B"
+    elif score == 3:     pct, label, color = 50, "半仓 50%", "#F97316"
+    else:                pct, label, color = 70, "重仓 70%", "#EF4444"
 
     from src.models.turning_points import distance_to_trigger
     dist = distance_to_trigger(df, med_w)
@@ -73,18 +89,17 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
     rule_defs = [
-        ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30", "短期动能衰竭"),
-        ("D: 深度回撤", bool(latest["rule_dd"]), f'{latest["drawdown_13w"]:.1f}%', "< -10%", "跌幅充分"),
-        ("C: 极度便宜", bool(latest["rule_cheap"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%", "历史低位区域"),
-        ("P: 恐慌指数", bool(latest["rule_panic"]), f'偏度{latest["skew_13w"]:.2f}', "偏度<-1 或 波动飙升", "极端左尾事件"),
-        ("M: 聪明钱", bool(latest["rule_micro"]), "待数据", "ETF份额逆势增", "机构越跌越买"),
+        ("R: RSI超卖", bool(latest["rule_rsi"]), f'{latest["rsi"]:.1f}', "< 30"),
+        ("D: 深度回撤", bool(latest["rule_dd"]), f'{latest["drawdown_13w"]:.1f}%', "< -10%"),
+        ("C: 极度便宜", bool(latest["rule_cheap"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
+        ("P: 恐慌指数", bool(latest["rule_panic"]), f'偏度{latest["skew_13w"]:.2f}', "偏度<-1 或 波动飙升"),
+        ("M: 聪明钱", bool(latest["rule_micro"]), "待数据", "ETF份额逆势增"),
     ]
     rules_html = ""
-    for name, ok, val, thresh, desc in rule_defs:
+    for name, ok, val, thresh in rule_defs:
         rules_html += f"""<div class="rule-row">
     <div class="rule-icon {'on' if ok else 'off'}">{'Y' if ok else '-'}</div>
     <div><strong>{name}</strong><br><span style="font-size:11px;color:#6b7280">{val} (阈值: {thresh})</span></div>
-    <div class="rule-desc">{desc}</div>
 </div>"""
 
     collapsed = collapse_signals(df["armed"])
@@ -98,44 +113,48 @@ def build_dashboard(output_path: str = "dashboard.html"):
     <td>{r['rsi']:.1f}</td><td>{r['drawdown_13w']:.1f}%</td><td>{'*' if first else ''}</td></tr>"""
 
     waterline_html = ""
-    for key, emoji in [("D", "红"), ("C", "绿")]:
+    for key, emoji in [("D",""),("C","")]:
         dv = dist[key]
         if dv["triggered"]:
-            waterline_html += f'<div style="padding:6px 12px;background:#f0fdf4;border-radius:6px;font-size:13px">{emoji} <b>{dv["name"]}</b>: 已触发</div>'
+            waterline_html += f'<div style="padding:6px 12px;background:#f0fdf4;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 已触发</div>'
         elif dv.get("trigger_price") and not np.isnan(dv["trigger_price"]):
-            waterline_html += f'<div style="padding:6px 12px;background:#fefce8;border-radius:6px;font-size:13px">{emoji} <b>{dv["name"]}</b>: 触发价 <b>{dv["trigger_price"]:.0f}</b> (距当前 {dv["pct_away"]:+.1f}%)</div>'
+            waterline_html += f'<div style="padding:6px 12px;background:#fefce8;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 触发价 <b>{dv["trigger_price"]:.0f}</b> (距当前 {dv["pct_away"]:+.1f}%)</div>'
 
     waterline_prices = {}
     for key in ["D", "C"]:
         if not dist[key]["triggered"] and dist[key].get("trigger_price") and not np.isnan(dist[key]["trigger_price"]):
             waterline_prices[key] = dist[key]["trigger_price"]
 
+    # ── 图表库：内联（首次下载缓存） ──
+    try:
+        lw_js = _get_lw_js()
+        lw_tag = f"<script>{lw_js}</script>"
+    except Exception as e:
+        print(f"图表库加载失败: {e}")
+        lw_tag = f'<script src="{LW_CDN}"></script>'
+
     chart_data = json.dumps(weekly_data, ensure_ascii=False)
     waterline_json = json.dumps(waterline_prices, ensure_ascii=False)
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>医药板块风险收益比监控器</title>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"
-        onerror="var s=document.createElement('script');s.src='https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';document.head.appendChild(s);"></script>
+{lw_tag}
 <style>{CSS}</style>
 </head>
-<body>
-<div class="container">
+<body><div class="container">
 <div class="header">
   <h1>医药板块 风险收益比监控器</h1>
-  <p>申万医药生物(801150) | 生成 {datetime.now().strftime('%Y-%m-%d %H:%M')} | 指标至 {data_date_str} | 日线至 {data_date_str} | AKShare</p>
+  <p>申万医药生物(801150) | 指标至 {data_date_str} | 价格来源: <b style="color:{price_color}">{price_source}</b> | 耗时 {time.time()-t0:.1f}s</p>
 </div>
 <div class="card"><div class="position-card">
   <div class="pct" style="color:{color}">{pct}%</div>
   <div class="label">{label}</div>
   <div style="margin-top:12px"><span class="signal-badge" style="background:{color}">Score {score}/5</span></div>
 </div></div>
-<div class="card"><div class="card-title">关键指标</div><div class="metrics">
-  <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价 ({data_date_str})</div></div>
+<div class="card"><div class="card-title">关键指标 ({data_date_str})</div><div class="metrics">
+  <div class="metric"><div class="val">{latest["price"]:.0f}</div><div class="lbl">收盘价</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['rsi']<30 else '#1f2937'}">{latest["rsi"]:.1f}</div><div class="lbl">RSI(14) Wilder</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['drawdown_13w']<-10 else '#1f2937'}">{latest["drawdown_13w"]:.1f}%</div><div class="lbl">13周最大回撤</div></div>
   <div class="metric"><div class="val" style="color:{'#ef4444' if latest['val_pct_5y']<15 else '#1f2937'}">{latest["val_pct_5y"]:.0f}%</div><div class="lbl">5年价格分位</div></div>
@@ -146,51 +165,56 @@ def build_dashboard(output_path: str = "dashboard.html"):
   <div style="display:flex;gap:8px;flex-wrap:wrap">{waterline_html if waterline_html else '<span style="color:#9ca3af">无法计算</span>'}</div>
 </div>
 <div class="card"><div class="card-title">五规则状态</div>{rules_html}</div>
-<div class="card"><div class="card-title">走势图 (近2年周线+近日线 | 黄箭头=Armed | 虚线=水位线)</div><div id="chart"></div></div>
+<div class="card"><div class="card-title">走势图 (黄箭头=Armed | 虚线=水位线)</div><div id="chart"></div></div>
 <div class="card"><div class="card-title">近期 Armed 信号 (* = 入场)</div>
   <table class="rec-table"><tr><th>日期</th><th>Score</th><th>价格</th><th>RSI</th><th>回撤</th><th>入场</th></tr>{armed_html}</table>
 </div>
-<div class="footer">AKShare | 耗时 {time.time()-t0:.2f}s | 仅供参考, 不构成投资建议</div>
+<div class="footer">AKShare | V4.4 | 仅供参考</div>
 </div>
 <script>
-var d = {chart_data};
-var chart = LightweightCharts.createChart(document.getElementById('chart'), {{
-    layout: {{ background: {{ color: '#ffffff' }}, textColor: '#1f2937' }},
-    grid: {{ vertLines: {{ color: '#f3f4f6' }}, horzLines: {{ color: '#f3f4f6' }} }},
-    rightPriceScale: {{ borderColor: '#d1d5db' }},
-    timeScale: {{ borderColor: '#d1d5db', timeVisible: true }},
-    width: document.getElementById('chart').clientWidth, height: 350,
-}});
-var line = chart.addLineSeries({{ color: '#3B82F6', lineWidth: 2 }});
-var uniqueData = [], seen = new Set();
-d.forEach(function(w) {{
-    if (!seen.has(w.time) && w.value != null && !isNaN(w.value)) {{ seen.add(w.time); uniqueData.push(w); }}
-}});
-uniqueData.sort(function(a,b) {{ return a.time.localeCompare(b.time); }});
-var prices = uniqueData.map(function(w) {{ return {{ time: w.time, value: w.value }}; }});
-var markers = uniqueData.filter(function(w) {{ return w.armed; }}).map(function(w) {{
-    return {{ time: w.time, position: 'belowBar', color: '#F59E0B', shape: 'arrowUp', text: String(w.score) }};
-}});
-line.setData(prices); line.setMarkers(markers);
-var waterlines = {waterline_json};
-var colors = {{ 'D': '#EF4444', 'C': '#10B981' }};
-var labels = {{ 'D': '回撤触发', 'C': '估值触发' }};
-Object.keys(waterlines).forEach(function(key) {{
-    var price = waterlines[key];
-    var wl = chart.addLineSeries({{ color: colors[key], lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }});
-    var data = [];
-    for (var i = 0; i < prices.length; i++) {{ data.push({{ time: prices[i].time, value: price }}); }}
-    wl.setData(data);
-    wl.setMarkers([{{ time: prices[prices.length-1].time, position: 'inLine', color: colors[key], shape: 'circle', text: labels[key] + ' ' + price.toFixed(0) }}]);
-}});
-chart.timeScale().fitContent();
-window.addEventListener('resize', function() {{ chart.applyOptions({{ width: document.getElementById('chart').clientWidth }}); }});
+try {{
+    var d = {chart_data};
+    var el = document.getElementById('chart');
+    var chart = LightweightCharts.createChart(el, {{
+        layout: {{ background: {{ color: '#ffffff' }}, textColor: '#1f2937' }},
+        grid: {{ vertLines: {{ color: '#f3f4f6' }}, horzLines: {{ color: '#f3f4f6' }} }},
+        rightPriceScale: {{ borderColor: '#d1d5db' }},
+        timeScale: {{ borderColor: '#d1d5db', timeVisible: true }},
+        width: el.clientWidth || window.innerWidth - 80 || 900, height: 350,
+    }});
+    var line = chart.addLineSeries({{ color: '#3B82F6', lineWidth: 2 }});
+    var uniqueData = [], seen = new Set();
+    d.forEach(function(w) {{
+        if (!seen.has(w.time) && w.value != null && !isNaN(w.value)) {{ seen.add(w.time); uniqueData.push(w); }}
+    }});
+    uniqueData.sort(function(a,b) {{ return a.time.localeCompare(b.time); }});
+    var prices = uniqueData.map(function(w) {{ return {{ time: w.time, value: w.value }}; }});
+    var markers = uniqueData.filter(function(w) {{ return w.armed; }}).map(function(w) {{
+        return {{ time: w.time, position: 'belowBar', color: '#F59E0B', shape: 'arrowUp', text: String(w.score) }};
+    }});
+    line.setData(prices); line.setMarkers(markers);
+    var waterlines = {waterline_json};
+    var colors = {{ 'D': '#EF4444', 'C': '#10B981' }};
+    var labels = {{ 'D': '回撤触发', 'C': '估值触发' }};
+    Object.keys(waterlines).forEach(function(key) {{
+        var price = waterlines[key];
+        var wl = chart.addLineSeries({{ color: colors[key], lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }});
+        var data = [];
+        for (var i = 0; i < prices.length; i++) {{ data.push({{ time: prices[i].time, value: price }}); }}
+        wl.setData(data);
+        wl.setMarkers([{{ time: prices[prices.length-1].time, position: 'inLine', color: colors[key], shape: 'circle', text: labels[key] + ' ' + price.toFixed(0) }}]);
+    }});
+    chart.timeScale().fitContent();
+    window.addEventListener('resize', function() {{ chart.applyOptions({{ width: el.clientWidth || window.innerWidth - 80 || 900 }}); }});
+}} catch(e) {{
+    document.getElementById('chart').innerHTML =
+        '<div style="padding:40px;text-align:center;color:#ef4444"><b>图表加载失败</b><br><small>'+e.message+'</small></div>';
+}}
 </script>
-</body>
-</html>"""
+</body></html>"""
 
     Path(output_path).write_text(html, encoding="utf-8")
-    print(f"Dashboard saved ({time.time()-t0:.2f}s)")
+    print(f"Dashboard saved ({time.time()-t0:.1f}s)")
     return output_path
 
 

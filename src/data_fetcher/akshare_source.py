@@ -7,32 +7,49 @@ try:
 except ImportError:
     ak = None
 
-def _realtime_fetch():
-    """抓取 000933 实时涨跌幅，绕过系统代理（EastMoney 被代理阻断）"""
-    import requests as _req
-    import os
-    # 清除环境变量 + monkey-patch requests.Session.send 禁用代理
-    saved_env = {k: os.environ.pop(k, None) for k in
-                 ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
-    os.environ["NO_PROXY"] = "*"
-    orig_send = _req.Session.send
-    def _no_proxy(self, req, **kw):
-        kw["proxies"] = {"http": None, "https": None}
-        kw.setdefault("timeout", 15)
-        return orig_send(self, req, **kw)
-    _req.Session.send = _no_proxy
+def fetch_realtime_price(symbol: str = "801150") -> float | None:
+    """实时价格：依次尝试多数据源，全部失败返回 None（降级到 EOD）"""
+    import urllib.request, json as _json
+
+    # ── 数据源 1: 东方财富 (000933 映射) ──
     try:
-        resp = _req.get(
-            "https://push2.eastmoney.com/api/qt/ulist.np/get",
-            params={"fltt": "2", "fields": "f2,f3", "secids": "1.000933"},
-            timeout=10)
-        data = resp.json()
-        return data.get("data", {}).get("diff", [{}])[0]
-    finally:
-        _req.Session.send = orig_send
-        for k, v in saved_env.items():
-            if v is not None: os.environ[k] = v
-        os.environ.pop("NO_PROXY", None)
+        resp = urllib.request.urlopen(
+            "https://push2.eastmoney.com/api/qt/ulist.np/get?"
+            "fltt=2&fields=f2,f3&secids=1.000933", timeout=10)
+        data = _json.loads(resp.read())
+        item = data["data"]["diff"][0]; pct = item["f3"] / 100.0
+        print(f"  [实时] 东财 000933: {item['f2']:.2f} ({pct*100:+.2f}%)")
+        return float(item["f2"]) * 0.995  # 000933→801150 近似
+    except Exception as e:
+        print(f"  [实时] 东财失败: {e}")
+
+    # ── 数据源 2: 新浪财经 ──
+    try:
+        url = f"http://hq.sinajs.cn/list=s_sh{symbol}"
+        req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn"})
+        resp = urllib.request.urlopen(req, timeout=5).read().decode("gbk", errors="ignore")
+        parts = resp.split('"')[1].split(",")
+        if len(parts) >= 2:
+            price = float(parts[1])
+            print(f"  [实时] 新浪: {price:.2f}")
+            return price
+    except Exception as e:
+        print(f"  [实时] 新浪失败: {e}")
+
+    # ── 数据源 3: 腾讯证券 ──
+    try:
+        url = f"https://qt.gtimg.cn/q=sh{symbol}"
+        resp = urllib.request.urlopen(url, timeout=5).read().decode("gbk", errors="ignore")
+        parts = resp.split("~")
+        if len(parts) > 3:
+            price = float(parts[3])
+            print(f"  [实时] 腾讯: {price:.2f}")
+            return price
+    except Exception as e:
+        print(f"  [实时] 腾讯失败: {e}")
+
+    print("  [实时] 全部失败，降级 EOD")
+    return None
 
 
 class AKShareSource:
@@ -56,21 +73,15 @@ class AKShareSource:
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-        # 用中证医疗(000933)盘中实时涨跌幅映射申万医药(801150)
+        # 多源实时价格，失败则降级 EOD
         try:
             today = pd.Timestamp.today().normalize()
             if today.weekday() < 5 and df.iloc[-1]["date"] < today:
-                item = _realtime_fetch()
-                pct_change = item.get("f3", 0) / 100.0
-                if abs(pct_change) < 0.001:
-                    raise Exception("无有效涨跌")
-                last_close = df.iloc[-1]["close"]
-                realtime_price = last_close * (1 + pct_change)
-                new_row = {"date": today, "close": realtime_price, "open": realtime_price,
-                           "high": realtime_price, "low": realtime_price,
-                           "volume": 0, "amount": 0}
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                print(f"[AKShare] 实时: 000933涨跌{pct_change*100:+.2f}% → 801150估算 {realtime_price:.2f}")
+                rt_price = fetch_realtime_price("801150")
+                if rt_price is not None:
+                    new_row = {"date": today, "close": rt_price, "open": rt_price,
+                               "high": rt_price, "low": rt_price, "volume": 0, "amount": 0}
+                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         except Exception:
             pass
 

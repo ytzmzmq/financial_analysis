@@ -33,7 +33,7 @@ HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>医药板块监控器</title>
-<script src="/static/lc.js"></script>
+<script src="/lw.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -331,7 +331,8 @@ function render(d) {
     </div>`;
   }).join('');
 
-  // Chart
+  // Chart (try-catch, 错误可见)
+  try {
   if (chart) { chart.remove(); chart = null; }
   const el = document.getElementById('chart');
   chart = LightweightCharts.createChart(el, {
@@ -339,7 +340,7 @@ function render(d) {
     grid: {vertLines:{color:'#1e293b'}, horzLines:{color:'#1e293b'}},
     rightPriceScale: {borderColor:'#2a2d3e'},
     timeScale: {borderColor:'#2a2d3e', timeVisible:true},
-    width: el.clientWidth, height: 320,
+    width: el.clientWidth || window.innerWidth - 80 || 900, height: 320,
   });
 
   const line = chart.addLineSeries({color:'#38bdf8', lineWidth:2});
@@ -382,8 +383,12 @@ function render(d) {
   });
   chart.timeScale().fitContent();
   window.addEventListener('resize', () => {
-    chart.applyOptions({width: el.clientWidth});
+    chart.applyOptions({width: el.clientWidth || window.innerWidth - 80 || 900});
   });
+  } catch(e) {
+    document.getElementById('chart').innerHTML =
+      '<div style="padding:40px;text-align:center;color:#ef4444"><b>图表加载失败</b><br><small>'+e.message+'</small></div>';
+  }
 
   // Armed signal table
   document.getElementById('sig-tbody').innerHTML = d.armed_history.slice(-20).reverse().map(s =>
@@ -494,6 +499,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/signal"):
             self._serve_api()
+        elif self.path == "/lw.js":
+            self._serve_lw()
         elif self.path.startswith("/static/"):
             self._serve_static()
         else:
@@ -503,6 +510,18 @@ class Handler(BaseHTTPRequestHandler):
         body = HTML.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_lw(self):
+        js_path = Path("data/lightweight-charts.min.js")
+        if not js_path.exists():
+            self.send_response(404); self.end_headers(); return
+        body = js_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/javascript")
+        self.send_header("Cache-Control", "max-age=86400")
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
