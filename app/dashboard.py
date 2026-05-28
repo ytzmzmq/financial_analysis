@@ -100,11 +100,11 @@ def build_dashboard(output_path: str = "dashboard.html"):
         if not bool(r["armed"]): continue
         d = r.name; first = bool(collapsed.iloc[i])
         armed_html += f"""<tr class="{'first-signal' if first else ''}">
-    <td>{d.strftime('%Y-%m-%d')}</td><td>{int(r['score'])}/5</td><td>{r['price']:.0f}</td>
+    <td>{d.strftime('%Y-%m-%d')}</td><td>{float(r['score']):.1f}</td><td>{r['price']:.0f}</td>
     <td>{r['rsi']:.1f}</td><td>{r['drawdown_13w']:.1f}%</td><td>{'*' if first else ''}</td></tr>"""
 
     waterline_html = ""
-    for key, emoji in [("D",""),("C","")]:
+    for key, emoji in [("S3",""),("V1","")]:
         dv = dist[key]
         if dv["triggered"]:
             waterline_html += f'<div style="padding:6px 12px;background:#f0fdf4;border-radius:6px;font-size:13px">{emoji}<b>{dv["name"]}</b>: 已触发</div>'
