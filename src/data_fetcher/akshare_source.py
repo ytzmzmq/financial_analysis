@@ -9,44 +9,28 @@ except ImportError:
 
 def fetch_realtime_price(symbol: str = "801150") -> float | None:
     """实时价格：依次尝试多数据源，全部失败返回 None（降级到 EOD）"""
-    import urllib.request, json as _json
+    import json as _json
+
+    def _get(url, timeout=8):
+        """绕过系统代理的 HTTP GET"""
+        import http.client, urllib.parse, ssl
+        ctx = ssl.create_default_context()
+        parts = urllib.parse.urlparse(url)
+        conn = http.client.HTTPSConnection(parts.hostname, timeout=timeout, context=ctx)
+        conn.request("GET", parts.path + ("?" + parts.query if parts.query else ""))
+        resp = conn.getresponse()
+        return resp.read().decode("utf-8", errors="ignore")
 
     # ── 数据源 1: 东方财富 (000933 映射) ──
     try:
-        resp = urllib.request.urlopen(
+        data = _json.loads(_get(
             "https://push2.eastmoney.com/api/qt/ulist.np/get?"
-            "fltt=2&fields=f2,f3&secids=1.000933", timeout=10)
-        data = _json.loads(resp.read())
-        item = data["data"]["diff"][0]; pct = item["f3"] / 100.0
-        print(f"  [实时] 东财 000933: {item['f2']:.2f} ({pct*100:+.2f}%)")
-        return float(item["f2"]) * 0.995  # 000933→801150 近似
+            "fltt=2&fields=f2,f3&secids=1.000933"))
+        item = data["data"]["diff"][0]
+        print(f"  [实时] 东财 000933: {item['f2']:.2f} ({item['f3']:+.2f}%)")
+        return float(item["f2"]) * 0.995
     except Exception as e:
         print(f"  [实时] 东财失败: {e}")
-
-    # ── 数据源 2: 新浪财经 ──
-    try:
-        url = f"http://hq.sinajs.cn/list=s_sh{symbol}"
-        req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn"})
-        resp = urllib.request.urlopen(req, timeout=5).read().decode("gbk", errors="ignore")
-        parts = resp.split('"')[1].split(",")
-        if len(parts) >= 2:
-            price = float(parts[1])
-            print(f"  [实时] 新浪: {price:.2f}")
-            return price
-    except Exception as e:
-        print(f"  [实时] 新浪失败: {e}")
-
-    # ── 数据源 3: 腾讯证券 ──
-    try:
-        url = f"https://qt.gtimg.cn/q=sh{symbol}"
-        resp = urllib.request.urlopen(url, timeout=5).read().decode("gbk", errors="ignore")
-        parts = resp.split("~")
-        if len(parts) > 3:
-            price = float(parts[3])
-            print(f"  [实时] 腾讯: {price:.2f}")
-            return price
-    except Exception as e:
-        print(f"  [实时] 腾讯失败: {e}")
 
     print("  [实时] 全部失败，降级 EOD")
     return None
