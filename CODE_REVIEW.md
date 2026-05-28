@@ -1,6 +1,6 @@
 # 医药板块风险收益比监控器 — 完整代码包
 
-> 文件总数: 17
+> 文件总数: 17 | 版本: V4.3 | 状态: 已修复 8 处 Bug
 
 ## 目录
 
@@ -247,7 +247,7 @@ uplift 在全部测试参数下均稳定在 +7.9%，说明 Armed 的条件收益
 
 ---
 
-## 八、版本记录
+## 十一、版本记录
 
 | 版本 | 关键变更 |
 |------|----------|
@@ -282,7 +282,6 @@ financial_analysis/
 ```
 
 ```
-
 ---
 
 ## 项目工作日志
@@ -735,7 +734,6 @@ start dashboard.html                      # 浏览器打开
 - 定位：极端超跌状态检测 / 风险收益比监控器（非底部预测器）
 
 ```
-
 ---
 
 ## 依赖清单
@@ -751,7 +749,6 @@ akshare>=1.11
 openpyxl>=3.1
 
 ```
-
 ---
 
 ## Git 忽略规则
@@ -770,7 +767,6 @@ data/raw/
 .claude/
 
 ```
-
 ---
 
 ## CI/CD 工作流
@@ -849,7 +845,6 @@ jobs:
             });
 
 ```
-
 ---
 
 ## 核心模块: 拐点检测与评估
@@ -864,7 +859,7 @@ jobs:
 核心变更 (V4→V4.1):
   1. 标签: 阈值式 → Triple Barrier (路径依赖, 无look-ahead)
   2. 评估: Precision/Recall → 条件期望 E[ret|Armed] vs E[ret]
-  3. 信号去重: 保留cluster内最高score, 非第一条
+  3. 信号去重: 保留cluster内第一条（最早可操作信号）
   4. 规则相关性: Pearson → conditional probability P(A|B)
   5. Benchmark对照: unconditional forward return
   6. Label clustering: 连续好买点合并, 避免Recall失真
@@ -965,8 +960,8 @@ def collapse_labels(labels: pd.DataFrame, max_gap_weeks: int = 4) -> pd.DataFram
                 clusters.append(current)
                 current = [d]
         clusters.append(current)
-        for cluster in clusters[1:]:  # 保留第一个, 其余标记为0
-            for d in cluster:
+        for cluster in clusters:
+            for d in cluster[1:]:  # 同一 cluster 内保留第一条, 其余清零
                 result.loc[d, 'label_collapsed'] = 0
 
     return result
@@ -1330,8 +1325,7 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
     df = pd.DataFrame(index=med_w.index)
     df['rule_rsi'] = (TurningPointDetector._rsi_wilder(med_w, 14) < rsi_thresh).astype(int)
     df['rule_dd'] = ((med_w / med_w.rolling(13).max() - 1) * 100 < dd_thresh).astype(int)
-    p5 = med_w.rolling(260, min_periods=52).apply(
-        lambda x: percentileofscore(x, x.iloc[-1], kind='rank'), raw=False)
+    p5 = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
     df['rule_cheap'] = (p5 < 15).astype(int)
     skew = med_w.pct_change().rolling(13).skew()
     vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
@@ -1400,11 +1394,10 @@ def alert_level(df: pd.DataFrame, prev_score: int | None = None) -> dict:
             return {"level": "yellow",
                     "message": f"临界预警！距底部极值线仅差 {min_away:.1f}%，随时可能触发，请备好资金。"}
         else:
-            return {"level": "green",
+            return {"level": "silent",
                     "message": "常态区间。未见极值错杀，安心生活。"}
 
 ```
-
 ---
 
 ## 数据源: AKShare
@@ -1794,7 +1787,6 @@ class AKShareSource:
         return results
 
 ```
-
 ---
 
 ## 数据源: FRED
@@ -1879,7 +1871,6 @@ class FREDSource:
         return results
 
 ```
-
 ---
 
 ## 数据源: Yahoo Finance (备用)
@@ -1987,7 +1978,6 @@ class YFinanceSource:
         return results
 
 ```
-
 ---
 
 ## 工具: 手动数据导入
@@ -2078,7 +2068,6 @@ class ManualInput:
         return data_dict
 
 ```
-
 ---
 
 ## 工具: OCR 截图提取
@@ -2188,7 +2177,6 @@ class OCRCapture:
         return result.dropna(subset=["date", "value"])
 
 ```
-
 ---
 
 ## 数据源包初始化
@@ -2204,7 +2192,6 @@ from .manual_input import ManualInput
 from .ocr_capture import OCRCapture
 
 ```
-
 ---
 
 ## 模型包初始化
@@ -2215,7 +2202,6 @@ from .ocr_capture import OCRCapture
 ```python
 
 ```
-
 ---
 
 ## 应用: CLI 跟踪器
@@ -2294,12 +2280,17 @@ def _compute(data: dict) -> dict:
             pass
     alert = alert_level(df, prev_score)
 
-    # 保存今天的 Score 到历史记录，供明天判断状态翻转
+    # 保存今天的 Score 到历史记录（按日期去重，避免同一天重复追加）
     if not hist_path.parent.exists():
         hist_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([{"date": latest.name.date(), "score": int(latest["score"])}]).to_csv(
-        hist_path, index=False, mode='a', header=not hist_path.exists()
-    )
+    today_str = str(latest.name.date())
+    if hist_path.exists():
+        hist = pd.read_csv(hist_path)
+        hist = hist[hist["date"] != today_str]  # 删除同日旧记录
+    else:
+        hist = pd.DataFrame(columns=["date", "score"])
+    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": int(latest["score"])}])], ignore_index=True)
+    hist.to_csv(hist_path, index=False)
 
     return {
         "date": latest.name.date(),
@@ -2423,7 +2414,6 @@ if __name__ == "__main__":
         run_cli()
 
 ```
-
 ---
 
 ## 应用: HTML 看板生成器
@@ -2495,7 +2485,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
     elif score == 3:
         pct, label, color = 50, "半仓 50% — 强信号", "#F97316"
     else:
-        pct, label, color = 70, f"重仓 {pct}% — 极强信号", "#EF4444"
+        pct, label, color = 70, "重仓 70% — 极强信号", "#EF4444"
 
     # ── Distance-to-Trigger ──
     from src.models.turning_points import distance_to_trigger
@@ -2658,7 +2648,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 
 <div class="footer">
   数据源: AKShare | 申万医药生物指数(801150) | 仅供研究参考, 不构成投资建议<br>
-  方法论: Triple Barrier + 五规则探测器 | 定位: 风险收益比监控器 | V4.2
+  方法论: Triple Barrier + 五规则探测器 | 定位: 风险收益比监控器 | V4.3
 </div>
 
 </div>
@@ -2720,7 +2710,6 @@ if __name__ == "__main__":
     build_dashboard()
 
 ```
-
 ---
 
 ## 应用: 推送通知
@@ -2887,7 +2876,6 @@ if __name__ == "__main__":
     run(dry_run=dry, test_push=test)
 
 ```
-
 ---
 
 ## 应用: CI 输出解析
@@ -2916,5 +2904,4 @@ with open("alert_result.txt", "w") as f:
 print(f"alert={alert} score={score}")
 
 ```
-
 ---

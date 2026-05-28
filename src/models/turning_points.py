@@ -202,7 +202,7 @@ def bootstrap_ci(data: np.ndarray, statistic_fn, n_iter: int = 2000,
 
 
 # ═══════════════════════════════════════════
-# 4. 信号去重 (保留cluster内最高score)
+# 4. 信号去重 (保留cluster内第一条, 最早可操作)
 # ═══════════════════════════════════════════
 
 def collapse_signals(signal_series: pd.Series,
@@ -495,9 +495,15 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series) -> dict:
     triggered_d = bool(latest['rule_dd'])
     pct_away_d = (trigger_d / curr_price - 1) * 100 if not triggered_d else 0.0
 
-    # Rule C (5年分位 < 15%): 过去 260 周价格序列的 15% 分位数
-    window_260 = med_w.tail(260)
-    trigger_c = window_260.quantile(0.15) if len(window_260) >= 52 else np.nan
+    # Rule C (5年分位 < 15%): 用滚动rank反推 — 找到分位=15对应的价格
+    if len(med_w) >= 52:
+        ranks = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
+        # 反推: 在最近数据中找 rank 最接近 15 的周的价格
+        recent = ranks.tail(26)  # 近半年
+        closest_idx = (recent - 15).abs().idxmin()
+        trigger_c = med_w.loc[closest_idx]
+    else:
+        trigger_c = np.nan
     triggered_c = bool(latest['rule_cheap'])
     pct_away_c = (trigger_c / curr_price - 1) * 100 if not triggered_c and not np.isnan(trigger_c) else 0.0
 

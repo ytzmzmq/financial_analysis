@@ -30,6 +30,8 @@ def _compute(data: dict) -> dict:
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
+    # 截断未来日期：resample 会把本周数据标为周五，若周五未到则剔除
+    med_w = med_w[med_w.index.date <= pd.Timestamp.today().date()]
 
     det = TurningPointDetector()
     df = det.compute(med_w)
@@ -55,30 +57,23 @@ def _compute(data: dict) -> dict:
     from src.models.turning_points import distance_to_trigger, alert_level
     dist = distance_to_trigger(df, med_w)
 
-    # 读取上一轮 Score (用于状态翻转检测)
+    # 读取历史 + 保存今天 (合并为一次IO，避免竞态)
     hist_path = Path("data/processed/signal_history.csv")
+    today_str = str(latest.name.date())
     prev_score = None
-    if hist_path.exists():
-        try:
-            hist = pd.read_csv(hist_path)
-            if len(hist) > 0:
-                prev_row = hist.iloc[-1]
-                prev_score = int(prev_row.get("score", 0))
-        except Exception:
-            pass
-    alert = alert_level(df, prev_score)
-
-    # 保存今天的 Score 到历史记录（按日期去重，避免同一天重复追加）
     if not hist_path.parent.exists():
         hist_path.parent.mkdir(parents=True, exist_ok=True)
-    today_str = str(latest.name.date())
     if hist_path.exists():
         hist = pd.read_csv(hist_path)
-        hist = hist[hist["date"] != today_str]  # 删除同日旧记录
+        if len(hist) > 0:
+            prev_score = int(hist.iloc[-1].get("score", 0))
+        hist = hist[hist["date"] != today_str]
     else:
         hist = pd.DataFrame(columns=["date", "score"])
     hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": int(latest["score"])}])], ignore_index=True)
     hist.to_csv(hist_path, index=False)
+
+    alert = alert_level(df, prev_score)
 
     return {
         "date": latest.name.date(),
