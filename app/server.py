@@ -120,7 +120,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .dist-pct.close{color:var(--yellow)}
 
 /* Chart */
-#chart{width:100%;height:320px}
+#chart{width:100%;max-width:100%;height:320px;overflow:hidden}
 
 /* Table */
 .sig-table{width:100%;border-collapse:collapse;font-size:12px}

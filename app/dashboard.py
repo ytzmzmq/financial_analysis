@@ -42,7 +42,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .rec-table th,.rec-table td{text-align:center;padding:6px 8px;border-bottom:1px solid #f3f4f6}
 .rec-table th{color:#6b7280;font-weight:600}
 .first-signal{font-weight:600}
-#chart{width:100%;height:350px}
+#chart{width:100%;max-width:100%;height:350px;overflow:hidden}
 .footer{text-align:center;color:#9ca3af;font-size:12px;margin-top:20px}
 .position-card{text-align:center;padding:24px}
 .position-card .pct{font-size:48px;font-weight:800}
@@ -180,7 +180,7 @@ try {{
         grid: {{ vertLines: {{ color: '#f3f4f6' }}, horzLines: {{ color: '#f3f4f6' }} }},
         rightPriceScale: {{ borderColor: '#d1d5db' }},
         timeScale: {{ borderColor: '#d1d5db', timeVisible: true }},
-        width: el.clientWidth || window.innerWidth - 80 || 900, height: 350,
+        width: Math.min(el.clientWidth || 900, window.innerWidth - 60 || 900), height: 350,
     }});
     var line = chart.addLineSeries({{ color: '#3B82F6', lineWidth: 2 }});
     var uniqueData = [], seen = new Set();
@@ -205,7 +205,7 @@ try {{
         wl.setMarkers([{{ time: prices[prices.length-1].time, position: 'inLine', color: colors[key], shape: 'circle', text: labels[key] + ' ' + price.toFixed(0) }}]);
     }});
     chart.timeScale().fitContent();
-    window.addEventListener('resize', function() {{ chart.applyOptions({{ width: el.clientWidth || window.innerWidth - 80 || 900 }}); }});
+    window.addEventListener('resize', function() {{ chart.applyOptions({{ width: Math.min(el.clientWidth || 900, window.innerWidth - 60 || 900) }}); }});
 }} catch(e) {{
     document.getElementById('chart').innerHTML =
         '<div style="padding:40px;text-align:center;color:#ef4444"><b>图表加载失败</b><br><small>'+e.message+'</small></div>';
