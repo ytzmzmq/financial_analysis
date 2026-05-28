@@ -44,7 +44,6 @@ def build_dashboard(output_path: str = "dashboard.html"):
     data = AKShareSource().fetch_all("2018-01-01")
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
-    med_w = med_w[med_w.index.date <= pd.Timestamp.today().date()]
 
     det = TurningPointDetector()
     df = det.compute(med_w)

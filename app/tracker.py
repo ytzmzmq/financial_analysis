@@ -30,8 +30,6 @@ def _compute(data: dict) -> dict:
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
-    # 截断未来日期：resample 会把本周数据标为周五，若周五未到则剔除
-    med_w = med_w[med_w.index.date <= pd.Timestamp.today().date()]
 
     det = TurningPointDetector()
     df = det.compute(med_w)

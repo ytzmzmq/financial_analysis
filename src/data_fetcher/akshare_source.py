@@ -17,15 +17,36 @@ class AKShareSource:
     # ── 申万医药生物指数 ──
     def fetch_sw_medical(self, start_date: str = "20180101",
                          end_date: str | None = None) -> pd.DataFrame:
-        """获取申万医药生物指数(801150)日线"""
+        """获取申万医药生物指数(801150)日线，自动抓取盘中实时价格"""
         if ak is None:
             raise ImportError("akshare not installed")
+
+        # 1. 获取历史日线
         df = ak.index_hist_sw(symbol="801150", period="day")
         df = df.rename(columns={
             "日期": "date", "收盘": "close", "开盘": "open",
             "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+
+        # 2. 自动抓取申万官网盘中实时最新价
+        try:
+            spot_df = ak.sw_index_spot()
+            spot_row = spot_df[spot_df["指数代码"] == "801150"]
+            if not spot_row.empty:
+                latest_price = float(spot_row["最新价"].iloc[0])
+                today = pd.Timestamp.today().normalize()
+                if today in df["date"].values:
+                    df.loc[df["date"] == today, "close"] = latest_price
+                else:
+                    new_row = {"date": today, "close": latest_price, "open": latest_price,
+                               "high": latest_price, "low": latest_price,
+                               "volume": 0, "amount": 0}
+                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                print(f"[AKShare] 盘中实时点位 801150: {latest_price}")
+        except Exception as e:
+            print(f"[AKShare] 实时点位获取失败, 退回历史数据: {e}")
+
         if end_date is None:
             end_date = pd.Timestamp.now().strftime("%Y%m%d")
         mask = (df["date"] >= pd.Timestamp(start_date)) & (df["date"] <= pd.Timestamp(end_date))
