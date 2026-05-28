@@ -17,7 +17,7 @@ class AKShareSource:
     # ── 申万医药生物指数 ──
     def fetch_sw_medical(self, start_date: str = "20180101",
                          end_date: str | None = None) -> pd.DataFrame:
-        """获取申万医药生物指数(801150)日线，自动抓取盘中实时价格"""
+        """获取申万医药生物指数(801150)日线，用 ETF 代理映射盘中实时价格"""
         if ak is None:
             raise ImportError("akshare not installed")
 
@@ -29,23 +29,26 @@ class AKShareSource:
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-        # 2. 自动抓取申万官网盘中实时最新价
+        # 2. 用 512290(生物医药ETF) 盘中涨跌幅推算指数实时点位
         try:
-            spot_df = ak.sw_index_spot()
-            spot_row = spot_df[spot_df["指数代码"] == "801150"]
-            if not spot_row.empty:
-                latest_price = float(spot_row["最新价"].iloc[0])
+            spot_df = ak.stock_zh_a_spot_em()
+            etf = spot_df[spot_df["代码"] == "512290"]
+            if not etf.empty:
+                pct_change = float(etf["涨跌幅"].iloc[0]) / 100.0
+                last_close = df.iloc[-1]["close"]
+                realtime_price = last_close * (1 + pct_change)
+
                 today = pd.Timestamp.today().normalize()
-                if today in df["date"].values:
-                    df.loc[df["date"] == today, "close"] = latest_price
-                else:
-                    new_row = {"date": today, "close": latest_price, "open": latest_price,
-                               "high": latest_price, "low": latest_price,
+                if df.iloc[-1]["date"] < today:
+                    new_row = {"date": today, "close": realtime_price, "open": realtime_price,
+                               "high": realtime_price, "low": realtime_price,
                                "volume": 0, "amount": 0}
                     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                print(f"[AKShare] 盘中实时点位 801150: {latest_price}")
-        except Exception as e:
-            print(f"[AKShare] 实时点位获取失败, 退回历史数据: {e}")
+                else:
+                    df.loc[df.index[-1], "close"] = realtime_price
+                print(f"[AKShare] ETF代理: 512290涨跌{pct_change*100:+.2f}% → 指数估算 {realtime_price:.2f}")
+        except Exception:
+            pass  # 周末休市或网络不佳，退回历史数据
 
         if end_date is None:
             end_date = pd.Timestamp.now().strftime("%Y%m%d")

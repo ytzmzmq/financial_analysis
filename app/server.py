@@ -335,10 +335,22 @@ function render(d) {
   });
 
   const line = chart.addLineSeries({color:'#38bdf8', lineWidth:2});
-  const prices = d.chart.map(w => ({time:w.time, value:w.value}));
+
+  // 去重 + 排序 (防止重复时间轴导致图表崩溃)
+  const uniqueData = [];
+  const seen = new Set();
+  d.chart.forEach(w => {
+    if (!seen.has(w.time) && w.value != null && !isNaN(w.value)) {
+      seen.add(w.time);
+      uniqueData.push(w);
+    }
+  });
+  uniqueData.sort((a,b) => a.time.localeCompare(b.time));
+
+  const prices = uniqueData.map(w => ({time:w.time, value:w.value}));
   line.setData(prices);
   line.setMarkers(
-    d.chart.filter(w => w.armed).map(w => ({
+    uniqueData.filter(w => w.armed).map(w => ({
       time:w.time, position:'belowBar', color:'#fbbf24',
       shape:'arrowUp', text: String(w.score)
     }))
@@ -388,13 +400,19 @@ load();
 # API: 实时计算信号并序列化为 JSON
 # ═══════════════════════════════════════════════════════════════
 
-def _compute_and_serialize() -> dict:
+def _compute_and_serialize(custom_price: float = None) -> dict:
     import time
     import numpy as np
     t0 = time.time()
 
-    from app.tracker import _compute, _load_data
-    sig = _compute(_load_data())
+    from app.tracker import _compute
+    from src.data_fetcher.akshare_source import AKShareSource
+
+    # 极速模式: 只拉取医药指数, 跳过宏观数据 (14s → <1s)
+    med_df = AKShareSource().fetch_sw_medical("20180101")
+    fast_data = {"sw_medical": med_df}
+
+    sig = _compute(fast_data, custom_price=custom_price)
 
     df = sig.get("df")
     dist = sig.get("distance_to_trigger", {})
@@ -480,9 +498,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_api(self):
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        custom_price = float(qs["price"][0]) if "price" in qs else None
         print(f"  [{datetime.now():%H:%M:%S}] 拉取数据中...")
         try:
-            payload = _compute_and_serialize()
+            payload = _compute_and_serialize(custom_price=custom_price)
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

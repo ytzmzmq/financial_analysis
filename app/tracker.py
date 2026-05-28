@@ -24,12 +24,16 @@ def _load_data() -> dict:
     return AKShareSource().fetch_all("2018-01-01")
 
 
-def _compute(data: dict) -> dict:
-    """计算信号并返回结构化结果。所有规则状态直接从 df 中读取，杜绝硬编码。"""
+def _compute(data: dict, custom_price: float = None) -> dict:
+    """计算信号。custom_price: 可选, 用指定价格覆盖最新周数据（用于试算）"""
     from src.models.turning_points import TurningPointDetector
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
+
+    # 用 custom_price 覆盖最新一周的收盘价（"跌到XX会触发"的试算功能）
+    if custom_price is not None and len(med_w) > 0:
+        med_w.iloc[-1] = custom_price
 
     det = TurningPointDetector()
     df = det.compute(med_w)
