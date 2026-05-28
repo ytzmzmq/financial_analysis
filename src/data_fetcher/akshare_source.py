@@ -1,40 +1,38 @@
 """A股数据源：行情、板块指数、资金流向 —— 通过 AKShare"""
 import pandas as pd
 import numpy as np
-import os
 
 try:
     import akshare as ak
 except ImportError:
     ak = None
 
-# AKShare 数据源均为国内站点，需绕过系统代理
-_NO_PROXY_DOMAINS = "eastmoney.com,10jqka.com.cn,sina.com.cn,swsresearch.com"
-
-
-def _bypass_proxy():
-    """绕过系统代理：移除环境变量 + monkey-patch requests 禁用 trust_env"""
-    saved_env = {}
-    for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        saved_env[k] = os.environ.pop(k, None)
-    os.environ["NO_PROXY"] = "*"; os.environ["no_proxy"] = "*"
-    # Monkey-patch: 强制 requests 不读取系统代理设置
-    import requests
-    saved_send = requests.Session.send
-    def _send_no_proxy(self, request, **kwargs):
-        kwargs["proxies"] = {"http": None, "https": None}
-        kwargs.setdefault("timeout", 15)
-        return saved_send(self, request, **kwargs)
-    requests.Session.send = _send_no_proxy
-    return {"env": saved_env, "send": saved_send}
-
-
-def _restore_proxy(saved: dict):
-    for k, v in saved["env"].items():
-        if v is not None:
-            os.environ[k] = v
-    import requests
-    requests.Session.send = saved["send"]
+def _realtime_fetch():
+    """抓取 000933 实时涨跌幅，绕过系统代理（EastMoney 被代理阻断）"""
+    import requests as _req
+    import os
+    # 清除环境变量 + monkey-patch requests.Session.send 禁用代理
+    saved_env = {k: os.environ.pop(k, None) for k in
+                 ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")}
+    os.environ["NO_PROXY"] = "*"
+    orig_send = _req.Session.send
+    def _no_proxy(self, req, **kw):
+        kw["proxies"] = {"http": None, "https": None}
+        kw.setdefault("timeout", 15)
+        return orig_send(self, req, **kw)
+    _req.Session.send = _no_proxy
+    try:
+        resp = _req.get(
+            "https://push2.eastmoney.com/api/qt/ulist.np/get",
+            params={"fltt": "2", "fields": "f2,f3", "secids": "1.000933"},
+            timeout=10)
+        data = resp.json()
+        return data.get("data", {}).get("diff", [{}])[0]
+    finally:
+        _req.Session.send = orig_send
+        for k, v in saved_env.items():
+            if v is not None: os.environ[k] = v
+        os.environ.pop("NO_PROXY", None)
 
 
 class AKShareSource:
@@ -58,24 +56,21 @@ class AKShareSource:
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-        # 用中证医疗(000933)盘中实时涨跌幅，映射到申万医药(801150)
-        # 000933 与 801150 高度相关(r>0.95)，且 AKShare 有实时接口
+        # 用中证医疗(000933)盘中实时涨跌幅映射申万医药(801150)
         try:
             today = pd.Timestamp.today().normalize()
             if today.weekday() < 5 and df.iloc[-1]["date"] < today:
-                saved = _bypass_proxy()
-                spot_df = ak.stock_zh_index_spot_em()
-                _restore_proxy(saved)
-                row = spot_df[spot_df["代码"] == "000933"]
-                if not row.empty:
-                    pct_change = float(row["涨跌幅"].iloc[0]) / 100.0
-                    last_close = df.iloc[-1]["close"]
-                    realtime_price = last_close * (1 + pct_change)
-                    new_row = {"date": today, "close": realtime_price, "open": realtime_price,
-                               "high": realtime_price, "low": realtime_price,
-                               "volume": 0, "amount": 0}
-                    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                    print(f"[AKShare] 中证医疗代理: 000933涨跌{pct_change*100:+.2f}% → 801150盘中估算 {realtime_price:.2f}")
+                item = _realtime_fetch()
+                pct_change = item.get("f3", 0) / 100.0
+                if abs(pct_change) < 0.001:
+                    raise Exception("无有效涨跌")
+                last_close = df.iloc[-1]["close"]
+                realtime_price = last_close * (1 + pct_change)
+                new_row = {"date": today, "close": realtime_price, "open": realtime_price,
+                           "high": realtime_price, "low": realtime_price,
+                           "volume": 0, "amount": 0}
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                print(f"[AKShare] 实时: 000933涨跌{pct_change*100:+.2f}% → 801150估算 {realtime_price:.2f}")
         except Exception:
             pass
 
