@@ -510,10 +510,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_dash(self):
         import subprocess, sys
-        dash_path = Path("dashboard.html")
-        if not dash_path.exists():
-            subprocess.run([sys.executable, "app/dashboard.py"], capture_output=True)
-        body = dash_path.read_bytes()
+        # 每次请求重新生成看板，保证数据最新
+        subprocess.run([sys.executable, "app/dashboard.py"], capture_output=True)
+        body = Path("dashboard.html").read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", len(body))
