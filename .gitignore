@@ -5,4 +5,4 @@ data/processed/
 data/raw/
 .vscode/
 .idea/
-.claude/
+.claude/settings.local.json
