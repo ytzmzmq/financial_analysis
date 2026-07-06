@@ -20,6 +20,8 @@ import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
 
+from src.models.indicators import rsi_wilder, macd_histogram
+
 
 # ═══════════════════════════════════════════
 # 1. Triple Barrier Labeling
@@ -131,7 +133,7 @@ class TurningPointDetector:
         df = pd.DataFrame(index=med_w.index)
         df['price'] = med_w
 
-        df['rsi'] = self._rsi_wilder(med_w, 14)
+        df['rsi'] = rsi_wilder(med_w, 14)
         df['rule_rsi'] = (df['rsi'] < 30).astype(int)
 
         df['drawdown_13w'] = (med_w / med_w.rolling(13).max() - 1) * 100
@@ -156,7 +158,7 @@ class TurningPointDetector:
         df['score'] = df[['rule_rsi','rule_dd','rule_cheap','rule_panic','rule_micro']].sum(axis=1)
         df['armed'] = (df['score'] >= 2).astype(int)
 
-        df['macd_hist'] = self._macd_histogram(med_w)
+        df['macd_hist'] = macd_histogram(med_w)
         df['macd_stable'] = (df['macd_hist'] >= df['macd_hist'].shift(1)).astype(int)
         df['above_ma2'] = (med_w > med_w.rolling(2).mean()).astype(int)
         df['right_confirm'] = ((df['macd_stable'] == 1) | (df['above_ma2'] == 1)).astype(int)
@@ -164,20 +166,8 @@ class TurningPointDetector:
 
         return df
 
-    @staticmethod
-    def _rsi_wilder(close, period=14):
-        delta = close.diff()
-        gain = delta.clip(lower=0); loss = (-delta).clip(lower=0)
-        avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-        avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-        rs = avg_gain / avg_loss.replace(0, np.nan)
-        return 100 - (100 / (1 + rs))
-
-    @staticmethod
-    def _macd_histogram(close, fast=12, slow=26, signal=9):
-        ef = close.ewm(span=fast, adjust=False).mean()
-        es = close.ewm(span=slow, adjust=False).mean()
-        return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+    # _rsi_wilder 和 _macd_histogram 已移至 src/models/indicators.py
+    # 通过顶部 import 使用
 
 
 class V5Detector:
@@ -191,12 +181,12 @@ class V5Detector:
 
     def compute(self, med_w: pd.Series, vol_w: pd.Series = None,
                 margin_w: pd.Series = None) -> pd.DataFrame:
-        from src.models.factor_optimizer import build_factor_pool, _rsi_wilder, _macd_histogram
+        from src.models.factor_optimizer import build_factor_pool
 
         pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
         df = pd.DataFrame(index=med_w.index)
         df["price"] = med_w
-        df["rsi"] = _rsi_wilder(med_w, 14)
+        df["rsi"] = rsi_wilder(med_w, 14)
         df["drawdown_13w"] = (med_w / med_w.rolling(13).max() - 1) * 100
         df["skew_13w"] = med_w.pct_change().rolling(13).skew()
         df["val_pct_5y"] = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
@@ -213,7 +203,7 @@ class V5Detector:
         df["rule_S3"] = pool.get("S3_margin_diverge", pd.Series(0, index=df.index))
 
         df["armed"] = (df["score"] >= self.V5_THRESHOLD).astype(int)
-        df["macd_hist"] = _macd_histogram(med_w)
+        df["macd_hist"] = macd_histogram(med_w)
         df["macd_stable"] = (df["macd_hist"] >= df["macd_hist"].shift(1)).astype(int)
         df["above_ma2"] = (med_w > med_w.rolling(2).mean()).astype(int)
         df["right_confirm"] = ((df["macd_stable"] == 1) | (df["above_ma2"] == 1)).astype(int)
@@ -517,7 +507,7 @@ def barrier_sensitivity(med_w: pd.Series,
 
 def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
     df = pd.DataFrame(index=med_w.index)
-    df['rule_rsi'] = (TurningPointDetector._rsi_wilder(med_w, 14) < rsi_thresh).astype(int)
+    df['rule_rsi'] = (rsi_wilder(med_w, 14) < rsi_thresh).astype(int)
     df['rule_dd'] = ((med_w / med_w.rolling(13).max() - 1) * 100 < dd_thresh).astype(int)
     p5 = med_w.rolling(260, min_periods=52).rank(pct=True) * 100
     df['rule_cheap'] = (p5 < 15).astype(int)
@@ -533,10 +523,19 @@ def _compute_five_rules(med_w, rsi_thresh, dd_thresh):
 # 10. Distance-to-Trigger (反推目标价)
 # ═══════════════════════════════════════════
 
-def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series, margin_w: pd.Series = None) -> dict:
-    """计算当前价格距离 S3 (新低背离) 和 V1 (估值冰点) 触发的价位差距"""
+def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series,
+                        margin_w: pd.Series = None,
+                        config: dict = None) -> dict:
+    """
+    计算当前价格距离各因子触发水位的差距。
+
+    config=None 时使用 MODEL_CONFIGS[ACTIVE_MODEL_VERSION]。
+    V5.1: 只算 S3/V1
+    V5.2: 额外算 L1（RSI 距 30）和 M1（偏度距 -1.5）
+    """
     latest = df.iloc[-1]
     curr_price = latest['price']
+    result = {}
 
     # S3 触发条件: 价格创13周新低 AND 融资4周逆势加仓。两者缺一不可
     trigger_s3 = np.nan
@@ -549,6 +548,10 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series, margin_w: pd.Series 
             trigger_s3 = med_w.iloc[-13:-1].min()
     triggered_s3 = bool(latest.get('rule_S3', 0))
     pct_away_s3 = (trigger_s3 / curr_price - 1) * 100 if not triggered_s3 and not np.isnan(trigger_s3) else 0.0
+    result["S3"] = {
+        "name": "新低背离(S3)", "triggered": triggered_s3,
+        "current": curr_price, "trigger_price": trigger_s3, "pct_away": pct_away_s3,
+    }
 
     # V1 (5年分位 < 15%): 过去260周价格的 15% 分位数 = 估值触发底线
     if len(med_w) >= 52:
@@ -557,24 +560,72 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series, margin_w: pd.Series 
         trigger_v1 = np.nan
     triggered_v1 = bool(latest.get('rule_V1', 0))
     pct_away_v1 = (trigger_v1 / curr_price - 1) * 100 if not triggered_v1 and not np.isnan(trigger_v1) else 0.0
-
-    return {
-        "S3": {
-            "name": "新低背离(S3)", "triggered": triggered_s3,
-            "current": curr_price, "trigger_price": trigger_s3, "pct_away": pct_away_s3,
-        },
-        "V1": {
-            "name": "估值冰点(V1)", "triggered": triggered_v1,
-            "current": curr_price, "trigger_price": trigger_v1, "pct_away": pct_away_v1,
-        },
+    result["V1"] = {
+        "name": "估值冰点(V1)", "triggered": triggered_v1,
+        "current": curr_price, "trigger_price": trigger_v1, "pct_away": pct_away_v1,
     }
 
+    # V5.2 额外因子
+    if config is not None and "L1_rsi_30" in config.get("factors", {}):
+        rsi_val = float(latest.get('rsi', 50))
+        rsi_gap = 30 - rsi_val  # 正数=离触发还差多少
+        result["L1"] = {
+            "name": "RSI超卖(L1)", "triggered": rsi_val < 30,
+            "current": rsi_val, "trigger_price": 30.0, "pct_away": rsi_gap,
+        }
 
-def alert_level(df: pd.DataFrame, prev_score: float | None = None) -> dict:
-    """智能报警级别 (V5.1: 阈值 3.5)"""
+    if config is not None and "M1_skew_neg" in config.get("factors", {}):
+        skew_val = float(latest.get('skew_13w', 0))
+        skew_gap = -1.5 - skew_val  # 负值=已触发，正值=还差多少
+        result["M1"] = {
+            "name": "偏度异常(M1)", "triggered": skew_val < -1.5,
+            "current": skew_val, "trigger_price": -1.5, "pct_away": skew_gap,
+        }
+
+    return result
+
+
+def alert_level(df: pd.DataFrame, prev_score: float | None = None,
+                config: dict = None) -> dict:
+    """
+    智能报警级别。
+
+    config=None 时使用 V5.1 逻辑（阈值 3.5）。
+    传入 V5.2 config 时按 signal_tier 判定:
+      strong_armed / standard_armed → red
+      weak_armed → yellow
+      hold → 按距离触发水位判断 silent / yellow
+    """
     latest = df.iloc[-1]
     curr_score = float(latest['score'])
-    if prev_score is None: prev_score = curr_score
+    if prev_score is None:
+        prev_score = curr_score
+
+    # 如果提供了 V5.2 config，使用 tier 判定
+    if config is not None and config.get("tier_rule") == "v52_tiers":
+        tier = latest.get("signal_tier", "hold")
+        if tier in ("strong_armed", "standard_armed"):
+            if tier == "strong_armed":
+                return {"level": "red",
+                        "message": f"Strong Armed (Score {curr_score}, {int(latest.get('n_factors', 0))}因子)，极高置信度！"}
+            else:
+                return {"level": "red",
+                        "message": f"Standard Armed (Score {curr_score})，按计划分批买入。"}
+        elif tier == "weak_armed":
+            return {"level": "yellow",
+                    "message": f"Weak Armed (Score {curr_score}, 仅S3+V1)，边际信号，谨慎操作。"}
+        # tier == "hold": 检查距离触发水位
+        dist = distance_to_trigger(df, df['price'], config=config)
+        min_away = 999
+        for key, dt in dist.items():
+            if not dt["triggered"] and abs(dt.get("pct_away", 999)) < min_away:
+                min_away = abs(dt["pct_away"])
+        if min_away <= 2.5:
+            return {"level": "yellow",
+                    "message": f"临界预警！距极值线仅 {min_away:.1f}%，备好资金。"}
+        return {"level": "silent", "message": "常态区间。"}
+
+    # V5.1 逻辑（默认）
     dist = distance_to_trigger(df, df['price'])
 
     if curr_score >= 3.5 and prev_score < 3.5:

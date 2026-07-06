@@ -4,12 +4,16 @@
 用法:
     python app/tracker.py              # 命令行
     streamlit run app/tracker.py       # Web界面
+
+V5.2: 消费 evaluate_signal() 结果，不再自己理解模型。
 """
 import sys
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import numpy as np
+
+from app.db import save_signal, get_latest_score
 
 try:
     import streamlit as st
@@ -28,8 +32,16 @@ def _load_data() -> dict:
 
 
 def _compute(data: dict, custom_price: float = None) -> dict:
-    """计算信号。custom_price: 可选, 用指定价格覆盖最新周数据（用于试算）"""
-    from src.models.turning_points import V5Detector
+    """
+    计算信号。
+
+    custom_price: 可选, 用指定价格覆盖最新周数据（用于试算）
+    """
+    from src.models.rule_registry import (
+        evaluate_signal, evaluate_signal_history,
+        MODEL_CONFIGS, ACTIVE_MODEL_VERSION
+    )
+    from src.models.turning_points import distance_to_trigger, alert_level
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
@@ -44,61 +56,68 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         mdf = data["total_margin"].set_index("date")["value"].sort_index()
         margin_w = mdf.resample("W-FRI").last().dropna().shift(1)
 
-    det = V5Detector()
-    df = det.compute(med_w, margin_w=margin_w)
-    latest = df.iloc[-1]
+    config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
 
-    # V5.1 三因子评分卡
-    rule_defs = [
-        ("rule_M1", "M1:偏度异常(4.5分)", f"偏度{latest['skew_13w']:.2f}", "< -1.5", "极端左尾恐慌"),
-        ("rule_S3", "S3:融资背离(3.0分)", "已触发" if latest.get("rule_S3",0) else "未触发", "价新低+融资增", "聪明钱抄底"),
-        ("rule_V1", "V1:估值冰点(2.5分)", f"{latest['val_pct_5y']:.0f}%", "< 15%分位", "历史低位区域"),
-    ]
-    rules_status = []
-    for col, name, val, thresh, desc in rule_defs:
-        rules_status.append({
-            "name": name, "triggered": bool(latest[col]),
-            "value": val, "threshold": thresh, "description": desc,
-        })
+    # ── 核心判定：调用 evaluate_signal() ──
+    result = evaluate_signal(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w)
 
-    from src.models.turning_points import distance_to_trigger, alert_level
-    dist = distance_to_trigger(df, med_w, margin_w=margin_w)
+    # 构建 df 用于图表 / 历史信号显示
+    df = evaluate_signal_history(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w)
 
-    # 读取历史 + 保存今天 (合并为一次IO，避免竞态)
-    hist_path = Path("data/processed/signal_history.csv")
-    today_str = str(latest.name.date())
-    prev_score = None
-    if not hist_path.parent.exists():
-        hist_path.parent.mkdir(parents=True, exist_ok=True)
-    if hist_path.exists():
-        hist = pd.read_csv(hist_path)
-        if len(hist) > 0:
-            prev_score = int(hist.iloc[-1].get("score", 0))
-        hist = hist[hist["date"] != today_str]
-    else:
-        hist = pd.DataFrame(columns=["date", "score"])
-    hist = pd.concat([hist, pd.DataFrame([{"date": today_str, "score": round(latest["score"], 1)}])], ignore_index=True)
-    hist.to_csv(hist_path, index=False)
+    # Distance to trigger（传入 config，V5.2 会额外计算 L1/M1）
+    dist = distance_to_trigger(df, med_w, margin_w=margin_w, config=config)
 
-    alert = alert_level(df, prev_score)
+    # 获取上一次 score（用于 alert_level 计算）
+    prev_score = get_latest_score()
+
+    # Alert level（传入 config，V5.2 按 tier 判定）
+    alert = alert_level(df, prev_score, config=config)
+
+    today_str = str(med_w.index[-1].date())
+
+    # 持久化到 SQLite（试算模式不写入）
+    if custom_price is None:
+        save_signal(
+            date=today_str,
+            score=result.score,
+            armed=result.is_armed,
+            alert_level=alert["level"],
+            price=result.price,
+            rsi=result.rsi,
+            drawdown_13w=result.drawdown_13w,
+            val_pct_5y=result.val_pct_5y,
+            rules_status=result.rules_status,
+            distance_to_trigger=dist,
+            # V5.2 新增字段
+            model_version=result.model_version,
+            signal_tier=result.signal_tier,
+            n_factors=result.n_factors_triggered,
+            is_live_signal=True,
+            factor_snapshot=result.factor_snapshot,
+            l1_triggered=result.l1_triggered,
+        )
 
     return {
-        "date": latest.name.date(),
-        "price": latest["price"],
-        "rsi": latest["rsi"],
-        "drawdown_13w": latest["drawdown_13w"],
-        "val_pct_5y": latest["val_pct_5y"],
-        "skew": latest["skew_13w"],
-        "vol": latest["vol_annual"],
-        "score": round(latest["score"], 1),
-        "armed": bool(latest["armed"]),
-        "buy": bool(latest["buy_signal"]),
-        "macd_ok": bool(latest["macd_stable"]),
-        "ma2_ok": bool(latest["above_ma2"]),
-        "rules_status": rules_status,
+        "date": result.date,
+        "price": result.price,
+        "rsi": result.rsi,
+        "drawdown_13w": result.drawdown_13w,
+        "val_pct_5y": result.val_pct_5y,
+        "skew": result.skew_13w,
+        "vol": result.vol_annual,
+        "score": result.score,
+        "max_score": result.max_score,
+        "signal_tier": result.signal_tier,
+        "n_factors": result.n_factors_triggered,
+        "armed": result.is_armed,
+        "buy": bool(df.iloc[-1]["buy_signal"]),
+        "macd_ok": bool(df.iloc[-1]["macd_stable"]),
+        "ma2_ok": bool(df.iloc[-1]["above_ma2"]),
+        "rules_status": result.rules_status,
         "distance_to_trigger": dist,
         "alert": alert,
         "df": df,
+        "model_version": result.model_version,
     }
 
 
@@ -107,27 +126,64 @@ def _compute(data: dict, custom_price: float = None) -> dict:
 # ═══════════════════════════════════════
 
 def run_cli():
+    import traceback as tb_mod
+    from app.db import log_error
+
     print("=" * 60)
     print("  医药生物板块(801150) — 底部探测器")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
 
+    # 拉取数据
     print("\n[1/2] 拉取数据...")
-    data = _load_data()
-    med = data["sw_medical"].set_index("date")["close"].sort_index()
-    med_w = med.resample("W-FRI").last().dropna()
-    print(f"  指数: {len(med_w)}周 ({med_w.index[0].date()} ~ {med_w.index[-1].date()})")
+    try:
+        data = _load_data()
+    except Exception as e:
+        err_msg = f"数据拉取失败: {e}"
+        print(f"\n  [ERROR] {err_msg}")
+        log_error("data_fetch", err_msg, "error")
+        return
 
+    # 数据新鲜度校验
+    try:
+        med = data["sw_medical"].set_index("date")["close"].sort_index()
+        med_w = med.resample("W-FRI").last().dropna()
+        latest_date = med_w.index[-1]
+        days_stale = (pd.Timestamp.now() - latest_date).days
+        if days_stale > 7:
+            warn_msg = f"数据可能过旧: 最新数据 {latest_date.date()}，距今 {days_stale} 天"
+            print(f"  [WARNING] {warn_msg}")
+            log_error("data_freshness", warn_msg, "warning")
+        if len(med_w) < 52:
+            warn_msg = f"数据量不足: 仅 {len(med_w)} 周（建议至少 52 周）"
+            print(f"  [WARNING] {warn_msg}")
+            log_error("data_quality", warn_msg, "warning")
+        print(f"  指数: {len(med_w)}周 ({med_w.index[0].date()} ~ {med_w.index[-1].date()})")
+    except Exception as e:
+        err_msg = f"数据解析失败: {e}"
+        print(f"\n  [ERROR] {err_msg}")
+        log_error("data_parse", err_msg, "error")
+        return
+
+    # 计算信号
     print("\n[2/2] 计算信号...")
-    sig = _compute(data)
+    try:
+        sig = _compute(data)
+    except Exception as e:
+        err_msg = f"信号计算失败: {e}"
+        print(f"\n  [ERROR] {err_msg}")
+        log_error("compute", err_msg, "error")
+        return
 
+    # ── 输出 ──
     status = "BUY ZONE" if sig["buy"] else "ARMED" if sig["armed"] else "HOLD"
     print(f"\n{'='*60}")
-    print(f"  {status}")
+    print(f"  {status}  [{sig['signal_tier']}]  ({sig['model_version']})")
     print(f"{'='*60}")
     print(f"  日期:       {sig['date']}")
     print(f"  收盘价:     {sig['price']:.2f}")
-    print(f"  Score:      {sig['score']}/5")
+    print(f"  Score:      {sig['score']}")
+    print(f"  Factors:    {sig['n_factors']} triggered")
     print()
 
     for r in sig["rules_status"]:
@@ -137,14 +193,16 @@ def run_cli():
     if sig["armed"]:
         print(f"\n  右侧确认: MACD={'ON' if sig['macd_ok'] else 'OFF'}  MA2={'ON' if sig['ma2_ok'] else 'OFF'}")
 
-    # Distance to trigger
+    # Distance to trigger (只显示有明确触发价格的因子: S3, V1)
     print(f"\n  距离触发:")
     dist = sig["distance_to_trigger"]
     for key in ["S3", "V1"]:
+        if key not in dist:
+            continue
         d = dist[key]
         if d["triggered"]:
             print(f"    {d['name']}: 已触发")
-        elif d.get("trigger_price"):
+        elif d.get("trigger_price") is not None:
             gap = d["trigger_price"] - d["current"]
             print(f"    {d['name']}: 未触发. 触发价={d['trigger_price']:.0f} (需跌至{d['trigger_price']:.0f}, 再跌{abs(d['pct_away']):.1f}%)")
 
@@ -156,7 +214,8 @@ def run_cli():
     if len(recent) > 0:
         print(f"\n  近期Armed信号 ({len(recent)}次):")
         for d, row in recent.tail(8).iterrows():
-            print(f"    {d.date()}  sc={int(row.score)}  RSI={row.rsi:.0f}  DD={row.drawdown_13w:.0f}%  price={row.price:.0f}")
+            tier_str = f"tier={row.get('signal_tier', '')}" if 'signal_tier' in row.index else ""
+            print(f"    {d.date()}  sc={row.score}  RSI={row.rsi:.0f}  DD={row.drawdown_13w:.0f}%  price={row.price:.0f}  {tier_str}")
 
     print()
 
@@ -176,12 +235,12 @@ def run_streamlit():
     st.markdown("---")
     c1, c2, c3 = st.columns(3)
     status = "BUY" if sig["buy"] else "ARMED" if sig["armed"] else "HOLD"
-    c1.metric("状态", status, delta=f"Score {sig['score']}/5")
+    c1.metric("状态", f"{status} [{sig['signal_tier']}]", delta=f"Score {sig['score']}")
     c2.metric("RSI(14)", f"{sig['rsi']:.1f}", delta=f"{sig['rsi']-30:.1f} vs 30")
     c3.metric("13周回撤", f"{sig['drawdown_13w']:.1f}%", delta=f"{sig['drawdown_13w']+10:.1f}% vs -10%")
 
     st.markdown("---")
-    st.subheader("五规则状态")
+    st.subheader("因子状态")
     for r in sig["rules_status"]:
         icon = "✅" if r["triggered"] else "⬜"
         st.write(f"{icon} **{r['name']}**: {r['value']} (阈值: {r['threshold']}) — *{r['description']}*")

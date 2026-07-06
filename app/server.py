@@ -140,6 +140,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 /* Footer */
 .footer{text-align:center;color:var(--muted);font-size:11px;
   margin-top:24px;padding-top:16px;border-top:1px solid var(--border);line-height:2}
+
+/* Tabs */
+.tabs{display:flex;gap:2px;margin-bottom:20px;background:var(--surface);
+  border-radius:10px;padding:4px;border:1px solid var(--border)}
+.tab-btn{flex:1;padding:10px 0;border:none;border-radius:8px;background:transparent;
+  color:var(--muted);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;
+  cursor:pointer;transition:.2s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{background:var(--surface2);color:var(--accent)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* Error banner */
+.error-banner{display:none;margin-bottom:16px;padding:12px 16px;
+  border-radius:8px;background:#450a0a;border:1px solid #991b1b;color:var(--red);font-size:13px;line-height:1.6}
+.error-banner .err-item{margin-bottom:4px}
+.error-banner .err-time{font-family:'DM Mono',monospace;font-size:11px;color:#fca5a5;margin-right:8px}
+.error-banner.warning{background:#451a03;border-color:#92400e;color:var(--yellow)}
+.error-banner.warning .err-time{color:#fde68a}
 </style>
 </head>
 <body>
@@ -157,6 +176,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 </div>
 
 <div id="app">
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('realtime')">实时监控</button>
+    <button class="tab-btn" onclick="switchTab('history')">历史信号</button>
+  </div>
+
+  <div id="tab-realtime" class="tab-content active">
+  <div class="error-banner" id="error-banner"></div>
   <div class="header">
     <div>
       <div class="header-title">申万医药生物(801150) · 风险收益比监控器</div>
@@ -184,14 +210,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       </div>
       <div style="min-width:180px">
         <div class="card-title">Score</div>
-        <div class="score-bar" id="score-bar">
-          <div class="score-seg" id="s0"></div>
-          <div class="score-seg" id="s1"></div>
-          <div class="score-seg" id="s2"></div>
-          <div class="score-seg" id="s3"></div>
-          <div class="score-seg" id="s4"></div>
-          <span class="score-label" id="score-lbl">0/5</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:6px;border-radius:3px;background:var(--border);overflow:hidden">
+            <div id="score-fill" style="height:100%;border-radius:3px;background:var(--accent);transition:.3s;width:0%"></div>
+          </div>
+          <span class="score-label" id="score-lbl">0.0</span>
         </div>
+        <div id="tier-lbl" style="font-size:11px;color:var(--muted);margin-top:4px;font-family:'DM Mono',monospace"></div>
       </div>
     </div>
   </div>
@@ -204,7 +229,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
   <!-- 五规则 -->
   <div class="card">
-    <div class="card-title">五规则状态</div>
+    <div class="card-title">因子状态</div>
     <div id="rules"></div>
   </div>
 
@@ -225,11 +250,36 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="card-title">近期 Armed 信号 (▶ = 入场信号)</div>
     <table class="sig-table">
       <thead><tr>
-        <th>日期</th><th>Score</th><th>价格</th><th>RSI</th><th>回撤</th>
+        <th>日期</th><th>Score</th><th>价格</th><th>RSI</th><th>回撤</th><th>Tier</th>
       </tr></thead>
       <tbody id="sig-tbody"></tbody>
     </table>
   </div>
+
+  </div><!-- /tab-realtime -->
+
+  <div id="tab-history" class="tab-content">
+    <div class="card">
+      <div class="card-title">历史信号记录（来源: SQLite）</div>
+      <div id="history-loading" style="text-align:center;color:var(--muted);padding:20px">加载中...</div>
+      <table class="sig-table" id="history-table" style="display:none">
+        <thead><tr>
+          <th>日期</th><th>Score</th><th>价格</th><th>警报</th>
+          <th>L1</th><th>M1</th><th>S3</th><th>V1</th>
+          <th>Tier</th>
+          <th>S3触发价</th><th>V1触发价</th>
+        </tr></thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+      <div id="history-empty" style="display:none;text-align:center;color:var(--muted);padding:20px">
+        暂无历史记录，运行 tracker.py 后自动积累
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Score 历史趋势</div>
+      <div id="score-history-chart" style="width:100%;height:240px"></div>
+    </div>
+  </div><!-- /tab-history -->
 
   <div class="footer">
     仅供研究参考，不构成投资建议 &nbsp;|&nbsp;
@@ -253,6 +303,7 @@ async function load() {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
     const d = await r.json();
+    window.__scoreThreshold = d.score_threshold;
     render(d);
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display = 'block';
@@ -281,14 +332,30 @@ function render(d) {
   msg.textContent = d.alert.message;
   msg.className = 'alert-msg ' + (level === 'silent' ? '' : level);
 
-  // Score bar
+  // Score bar (dynamic progress bar)
   const score = d.score;
-  const colorClass = score >= 4 ? 'alert' : score >= 2 ? 'warn' : '';
-  for(let i = 0; i < 5; i++) {
-    const seg = document.getElementById('s' + i);
-    seg.className = 'score-seg' + (i < score ? ' active ' + colorClass : '');
-  }
-  document.getElementById('score-lbl').textContent = score + '/5';
+  const maxScore = d.max_score || 10.0;
+  const pctFill = Math.min(score / maxScore * 100, 100);
+  const fillColor = score >= maxScore * 0.4 ? (score >= maxScore * 0.7 ? 'var(--red)' : 'var(--yellow)') : 'var(--accent)';
+  document.getElementById('score-fill').style.width = pctFill + '%';
+  document.getElementById('score-fill').style.background = fillColor;
+  document.getElementById('score-lbl').textContent = score.toFixed(1);
+
+  // Tier display
+  const tierMap = {
+    'hold': 'HOLD', 'weak_armed': 'WEAK ARMED',
+    'standard_armed': 'STANDARD ARMED', 'strong_armed': 'STRONG ARMED',
+    'armed': 'ARMED'
+  };
+  const tierColor = {
+    'hold': 'var(--muted)', 'weak_armed': 'var(--yellow)',
+    'standard_armed': 'var(--red)', 'strong_armed': 'var(--red)',
+    'armed': 'var(--red)'
+  };
+  const tierLbl = document.getElementById('tier-lbl');
+  const tierKey = d.signal_tier || 'hold';
+  tierLbl.textContent = (tierMap[tierKey] || tierKey) + (d.n_factors ? ' (' + d.n_factors + ' factors)' : '');
+  tierLbl.style.color = tierColor[tierKey] || 'var(--muted)';
 
   // Metrics
   const metrics = [
@@ -393,8 +460,9 @@ function render(d) {
   // Armed signal table
   document.getElementById('sig-tbody').innerHTML = d.armed_history.slice(-20).reverse().map(s =>
     `<tr class="${s.first?'first':''}">
-       <td>${s.date}</td><td>${s.score}/5</td><td>${s.price}</td>
+       <td>${s.date}</td><td>${s.score.toFixed(1)}</td><td>${s.price}</td>
        <td>${s.rsi}</td><td>${s.dd}%</td>
+       <td style="font-size:10px">${s.tier || ''}</td>
      </tr>`
   ).join('');
 
@@ -403,6 +471,107 @@ function render(d) {
     `行情来源: AKShare | 计算耗时: ${d.elapsed_s}s`;
 }
 
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  const labels = {realtime: '实时监控', history: '历史信号'};
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    if (btn.textContent.trim() === labels[name]) btn.classList.add('active');
+  });
+  if (name === 'history') loadHistory();
+}
+
+let _historyLoaded = false;
+async function loadHistory() {
+  if (_historyLoaded) return;
+  _historyLoaded = true;
+  try {
+    const r = await fetch('/api/history');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const rows = await r.json();
+    const tbody = document.getElementById('history-tbody');
+    if (rows.length === 0) {
+      document.getElementById('history-loading').style.display = 'none';
+      document.getElementById('history-empty').style.display = 'block';
+      return;
+    }
+    document.getElementById('history-loading').style.display = 'none';
+    document.getElementById('history-table').style.display = 'table';
+    tbody.innerHTML = rows.map(r => {
+      const ac = {silent:'var(--muted)', yellow:'var(--yellow)', red:'var(--red)'}[r.alert_level] || 'var(--muted)';
+      const al = {silent:'静默', yellow:'YELLOW', red:'RED'}[r.alert_level] || r.alert_level;
+      const dot = c => c ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--border)">—</span>';
+      const tierDisp = r.signal_tier || '';
+      return '<tr>' +
+        '<td>' + r.date + '</td>' +
+        '<td>' + (r.score ? r.score.toFixed(1) : '-') + '</td>' +
+        '<td>' + (r.price ? r.price.toFixed(0) : '-') + '</td>' +
+        '<td style="color:' + ac + '">' + al + '</td>' +
+        '<td>' + dot(r.l1_triggered) + '</td>' +
+        '<td>' + dot(r.m1_triggered) + '</td>' +
+        '<td>' + dot(r.s3_triggered) + '</td>' +
+        '<td>' + dot(r.v1_triggered) + '</td>' +
+        '<td style="font-size:10px">' + tierDisp + '</td>' +
+        '<td>' + (r.s3_trigger_price ? r.s3_trigger_price.toFixed(0) : '-') + '</td>' +
+        '<td>' + (r.v1_trigger_price ? r.v1_trigger_price.toFixed(0) : '-') + '</td>' +
+      '</tr>';
+    }).join('');
+    renderScoreChart(rows);
+  } catch(e) {
+    document.getElementById('history-loading').textContent = '加载失败: ' + e.message;
+  }
+}
+
+function renderScoreChart(rows) {
+  try {
+    const el = document.getElementById('score-history-chart');
+    const c = LightweightCharts.createChart(el, {
+      layout: {background:{color:'transparent'}, textColor:'#94a3b8'},
+      grid: {vertLines:{color:'#1e293b'}, horzLines:{color:'#1e293b'}},
+      rightPriceScale: {borderColor:'#2a2d3e'},
+      timeScale: {borderColor:'#2a2d3e'},
+      width: el.clientWidth || 900, height: 240,
+    });
+    const series = c.addLineSeries({color:'#38bdf8', lineWidth:2});
+    const data = rows.slice().reverse().map(r => ({time: r.date, value: r.score}));
+    series.setData(data);
+    // Armed threshold line (only show for V5.1 score_threshold mode)
+    if (window.__scoreThreshold != null) {
+    const th = c.addLineSeries({
+      color:'#fbbf24', lineWidth:1, lineStyle:2,
+      priceLineVisible:false, lastValueVisible:false,
+    });
+    th.setData(data.map(d => ({time: d.time, value: window.__scoreThreshold})));
+    }
+    c.timeScale().fitContent();
+    window.addEventListener('resize', () => {
+      c.applyOptions({width: el.clientWidth || 900});
+    });
+  } catch(e) {
+    document.getElementById('score-history-chart').innerHTML =
+      '<div style="padding:20px;text-align:center;color:#ef4444">图表加载失败: '+e.message+'</div>';
+  }
+}
+
+async function loadErrors() {
+  try {
+    const r = await fetch('/api/errors');
+    if (!r.ok) return;
+    const errors = await r.json();
+    const banner = document.getElementById('error-banner');
+    if (errors.length === 0) { banner.style.display = 'none'; return; }
+    const hasError = errors.some(e => e.level === 'error');
+    banner.className = 'error-banner' + (hasError ? '' : ' warning');
+    banner.style.display = 'block';
+    banner.innerHTML = errors.slice(0, 5).map(e =>
+      '<div class="err-item"><span class="err-time">' + e.timestamp +
+      '</span>[' + e.source + '] ' + e.message + '</div>'
+    ).join('');
+  } catch(e) {}
+}
+
+loadErrors();
 load();
 </script>
 </body>
@@ -420,12 +589,17 @@ def _compute_and_serialize(custom_price: float = None) -> dict:
 
     from app.tracker import _compute
     from src.data_fetcher.akshare_source import AKShareSource
+    from app.db import log_error
 
     # 极速模式: 拉取医药指数+融资数据 (S3因子需要资金面)
-    ak_src = AKShareSource()
-    med_df = ak_src.fetch_sw_medical("20180101")
-    margin_df = ak_src.fetch_margin_data("20180101")
-    fast_data = {"sw_medical": med_df, "total_margin": margin_df}
+    try:
+        ak_src = AKShareSource()
+        med_df = ak_src.fetch_sw_medical("20180101")
+        margin_df = ak_src.fetch_margin_data("20180101")
+        fast_data = {"sw_medical": med_df, "total_margin": margin_df}
+    except Exception as e:
+        log_error("data_fetch", f"Web端数据拉取失败: {e}", "error")
+        raise
 
     sig = _compute(fast_data, custom_price=custom_price)
 
@@ -451,7 +625,7 @@ def _compute_and_serialize(custom_price: float = None) -> dict:
                 "time": r.name.strftime("%Y-%m-%d"),
                 "value": round(float(r["price"]), 2),
                 "armed": bool(r["armed"]),
-                "score": int(r["score"]),
+                "score": round(float(r["score"]), 1),
             })
 
     # ── 近期 Armed 信号 ──
@@ -465,21 +639,32 @@ def _compute_and_serialize(custom_price: float = None) -> dict:
                 continue
             armed_history.append({
                 "date": r.name.strftime("%Y-%m-%d"),
-                "score": int(r["score"]),
+                "score": round(float(r["score"]), 1),
                 "price": round(float(r["price"])),
                 "rsi": round(float(r["rsi"]), 1),
                 "dd": round(float(r["drawdown_13w"]), 1),
                 "first": bool(collapsed.iloc[i]),
+                "tier": r.get("signal_tier", ""),
             })
 
     elapsed = round(time.time() - t0, 1)
+
+    # score_threshold: V5.1 才有（用于图表阈值线），V5.2 返回 null
+    from src.models.rule_registry import MODEL_CONFIGS
+    cfg = MODEL_CONFIGS.get(sig.get("model_version", "V5.1"), {})
+    score_threshold = cfg.get("score_threshold")  # V5.1=3.5, V5.2=None
 
     return {
         "date": str(sig["date"]),
         "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "elapsed_s": elapsed,
         "price": float(sig["price"]),
-        "score": int(sig["score"]),
+        "score": float(sig["score"]),
+        "max_score": float(sig.get("max_score", 10.0)),
+        "signal_tier": sig.get("signal_tier", "hold"),
+        "n_factors": int(sig.get("n_factors", 0)),
+        "model_version": sig.get("model_version", "V5.1"),
+        "score_threshold": score_threshold,
         "armed": bool(sig["armed"]),
         "rsi": float(sig["rsi"]),
         "drawdown_13w": float(sig["drawdown_13w"]),
@@ -501,6 +686,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/signal"):
             self._serve_api()
+        elif self.path.startswith("/api/history"):
+            self._serve_history()
+        elif self.path.startswith("/api/errors"):
+            self._serve_errors()
         elif self.path == "/lw.js":
             self._serve_lw()
         elif self.path.startswith("/static/"):
@@ -519,40 +708,45 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_api(self):
-        from urllib.parse import urlparse, parse_qs
-        qs = parse_qs(urlparse(self.path).query)
-        custom_price = float(qs["price"][0]) if "price" in qs else None
-        print(f"  [{datetime.now():%H:%M:%S}] 计算中...")
+    def _serve_history(self):
+        """从 SQLite 读取历史信号记录"""
         try:
-            from app.tracker import _compute, _load_data
-            data = _load_data()
-            if custom_price is not None:
-                # 覆盖最后一周价格为试算值
-                med = data["sw_medical"].set_index("date")["close"].sort_index()
-                med_w = med.resample("W-FRI").last().dropna()
-                med_w.iloc[-1] = custom_price
-                data["sw_medical"] = med_w.reset_index().rename(columns={"index":"date",0:"close"})
-                # 让 _compute 使用修改后的数据
-                data["_custom_med_w"] = med_w
-            sig = _compute(data)
-            dist = sig.get("distance_to_trigger", {})
-            payload = {
-                "score": sig["score"],
-                "status": "ARMED" if sig["armed"] else "HOLD",
-                "d_trigger": f'{dist["D"]["trigger_price"]:.0f}' if dist["D"].get("trigger_price") else None,
-                "c_trigger": f'{dist["C"]["trigger_price"]:.0f}' if dist["C"].get("trigger_price") else None,
-            }
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            from app.db import get_history
+            rows = get_history()
+            body = json.dumps(rows, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", len(body))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            body = json.dumps({"error": str(e)}, ensure_ascii=False).encode()
+            self.send_response(500)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", len(body))
             self.end_headers()
             self.wfile.write(body)
-        except Exception as e:
-            self.send_response(500)
+
+    def _serve_errors(self):
+        """返回最近 24 小时内的系统错误/警告日志"""
+        try:
+            from app.db import get_recent_errors
+            errors = get_recent_errors(hours=24)
+            body = json.dumps(errors, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", len(body))
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+            self.wfile.write(body)
+        except Exception as e:
+            body = json.dumps({"error": str(e)}, ensure_ascii=False).encode()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", len(body))
+            self.end_headers()
+            self.wfile.write(body)
 
     def _serve_lw(self):
         js_path = Path("data/lightweight-charts.min.js")
@@ -594,7 +788,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
-            print(f"  [{datetime.now():%H:%M:%S}] 完成 ({payload['elapsed_s']}s) — Score={payload['score']}/5 [{payload['alert']['level'].upper()}]")
+            print(f"  [{datetime.now():%H:%M:%S}] 完成 ({payload['elapsed_s']}s) — Score={payload['score']:.1f} [{payload['signal_tier']}] ({payload['model_version']}) [{payload['alert']['level'].upper()}]")
         except Exception as e:
             tb = traceback.format_exc()
             print(f"  [ERROR] {e}\n{tb}")

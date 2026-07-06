@@ -26,7 +26,7 @@ jobs:
 
       - name: Verify code
         run: |
-          python -c "from src.models.turning_points import TurningPointDetector; print('Import OK')"
+          python -c "from src.models.rule_registry import evaluate_signal, ACTIVE_MODEL_VERSION; print(f'Version: {ACTIVE_MODEL_VERSION}')"
           python -c "from app.tracker import _compute, _load_data; print('Tracker OK')"
 
       - name: Run monitor
@@ -50,7 +50,7 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add dashboard.html data/processed/signal_history.csv 2>/dev/null || true
+          git add dashboard.html data/processed/signals.db 2>/dev/null || true
           git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) ${{ steps.parsed.outputs.alert }}" && git push || true)
 
       - name: Issue (RED)
@@ -63,6 +63,6 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner, repo: context.repo.repo,
               title: `ARMED! Score=${{ steps.parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
-              body: '```\n' + out + '\n```\n\n历史Armed信号13周期望+8.4%',
+              body: '```\n' + out + '\n```\n\nV5.2 四因子两层判定 (n_factors>=2 + tier)',
               labels: ['armed','alert']
             });

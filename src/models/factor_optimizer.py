@@ -12,6 +12,8 @@ import pandas as pd
 import numpy as np
 from scipy.stats import percentileofscore
 
+from src.models.indicators import rsi_wilder, macd_histogram
+
 
 # ═══════════════════════════════════════════
 # 阶段1: 候选因子池
@@ -43,7 +45,7 @@ def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
         ).astype(int)
 
     # ── 维度2: 量价冰点 (Liquidity) ──
-    pool["L1_rsi_30"] = (_rsi_wilder(med_w, 14) < 30).astype(int)
+    pool["L1_rsi_30"] = (rsi_wilder(med_w, 14) < 30).astype(int)
     pool["L2_dd_12pct"] = ((med_w / med_w.rolling(13).max() - 1) * 100 < -12).astype(int)
 
     vol = med_w.pct_change().rolling(13).std() * np.sqrt(52) * 100
@@ -63,14 +65,14 @@ def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
     pool["M1_skew_neg"] = (skew < -1.5).astype(int)
     pool["M2_mom_4w"] = (med_w.pct_change(4) * 100 < -8).astype(int)
 
-    macd_hist = _macd_histogram(med_w)
+    macd_hist = macd_histogram(med_w)
     pool["M3_macd_low"] = (macd_hist < macd_hist.rolling(13).min()).astype(int)
 
     # ── 维度4: 资金背离 (Smart Money) ──
-    ll_rsi = _rsi_wilder(med_w, 14).rolling(52).min()
+    ll_rsi = rsi_wilder(med_w, 14).rolling(52).min()
     pool["S1_divergence"] = (
         (pool["V2_near_52w_low"] == 1) &
-        (_rsi_wilder(med_w, 14) > ll_rsi + 5)
+        (rsi_wilder(med_w, 14) > ll_rsi + 5)
     ).astype(int)
 
     weekly_ret = med_w.pct_change() * 100
@@ -90,20 +92,8 @@ def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
     return pool.fillna(0).astype(int)
 
 
-def _rsi_wilder(close, period=14):
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = (-delta).clip(lower=0)
-    avg_gain = gain.ewm(alpha=1/period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
-
-
-def _macd_histogram(close, fast=12, slow=26, signal=9):
-    ef = close.ewm(span=fast, adjust=False).mean()
-    es = close.ewm(span=slow, adjust=False).mean()
-    return (ef - es) - (ef - es).ewm(span=signal, adjust=False).mean()
+# _rsi_wilder 和 _macd_histogram 已移至 src/models/indicators.py
+# 本文件通过顶部 import 和向后兼容别名使用它们
 
 
 # ═══════════════════════════════════════════

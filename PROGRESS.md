@@ -472,3 +472,91 @@ start dashboard.html                      # 浏览器打开
 - Uplift 对 Triple Barrier 参数不敏感（9 组参数组合均稳定在 +7.9%）
 - 条件 Hit ratio = 70%（无条件 = 48%）
 - 定位：极端超跌状态检测 / 风险收益比监控器（非底部预测器）
+
+---
+
+## 第八章：监控基础设施 (2026-07-07)
+
+### 背景
+
+V5.1 模型定型后，原有的信号持久化依赖 `signal_history.csv`，没有错误处理机制，因子稳健性只能手动跑 optimizer 验证。需要将"手动跑脚本"升级为"自动运行 + 自动报警 + 定期自检"的完整监控链路，同时为搬运到新机器（ThinkBook 16+）做准备。
+
+### 设计决策
+
+存储选型选了 SQLite 而不是继续用 CSV，原因是 CSV 只能存两个字段（date/score），而我们需要记录完整的信号快照（armed 状态、三因子触发情况、触发价位等）来支持后续的因子审计。SQLite 是 Python 内置的，零依赖零成本，且支持结构化查询。
+
+错误处理采用"写库 + 页面展示"方案而非推送通知，因为用户大部分时间在本地看页面，推送只在 YELLOW/RED 时使用。数据源错误（AKShare 网络问题）和计算错误（因子计算异常）分层捕获，写入 system_log 表，前端页面顶部自动拉取并显示横幅。
+
+因子审计选择月度频率 + 只生成报告不自动切换模型。自动切换模型风险太高——因子筛选的结果对小样本敏感，人工审核后再决定是否更新评分卡更稳妥。
+
+### 实现细节
+
+**db.py** 提供三个核心函数：`save_signal`（写入信号，INSERT OR REPLACE 按日期去重）、`get_history`（读取历史，按日期倒序）、`get_latest_score`（获取上一次 score 用于 alert_level 计算）。另加 `log_error` 和 `get_recent_errors` 用于错误日志。首次运行自动检测旧 CSV 并迁移数据。数据库文件路径硬编码为项目根目录下的 `data/processed/signals.db`，不依赖工作目录。
+
+**tracker.py** 的 `_compute` 函数改用 SQLite 持久化，并增加试算模式判断（`custom_price is not None` 时不写库）。`run_cli` 函数加了三层 try/except：数据拉取、数据解析、信号计算分别捕获异常并写入 system_log。数据新鲜度校验（超过 7 天告警）和数据量校验（少于 52 周告警）作为 warning 级别记录。
+
+**server.py** 新增三个路由：`/api/history`（从 SQLite 读历史信号）、`/api/errors`（读最近 24h 错误日志）。前端加了 Tab 切换（实时监控 / 历史信号），历史 Tab 包含信号表格（日期/Score/价格/警报级别/三因子状态/触发价）和 Score 趋势图（带 3.5 分 Armed 虚线）。错误横幅在页面加载时自动检查，有错误显示红色/黄色，无错误自动隐藏。同时清理了原有重复定义的 `_serve_api` 方法。
+
+**monthly_audit.py** 分 Part A 和 Part B。Part A 做三项稳健性检验：滚动窗口稳定性（近 3 年 vs 全历史的条件收益，偏差 >50% 标"漂移"）、触发频率漂移（近半年 vs 全历史）、信号质量回顾（最近 10 次 Armed 的 13 周前瞻收益）。Part B 运行 `run_full_pipeline` 全流程，对比当前 V5 评分卡的三个因子，标注新通过和不再通过的因子，给出候选评分卡建议。报告输出为 markdown。
+
+**定时任务** 通过 Windows 任务计划程序实现：`run_tracker.bat` 每天 14:45 执行（收盘前 15 分钟抓尾盘数据），`run_audit.bat` 每月 1 号 09:00 执行。两个 bat 文件都把日志追加到 `data/processed/` 下对应的 log 文件。
+
+### 新增/修改文件清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `app/db.py` | 新增 | SQLite 存储模块（signals + system_log 表） |
+| `app/monthly_audit.py` | 新增 | 月度因子审计脚本 |
+| `run_tracker.bat` | 新增 | 每日定时任务批处理 |
+| `run_audit.bat` | 新增 | 每月定时任务批处理 |
+| `README.md` | 新增 | 使用说明 + 新机搬运指南 |
+| `app/tracker.py` | 修改 | CSV→SQLite，三层 try/except，数据校验 |
+| `app/server.py` | 修改 | 历史 Tab、错误横幅、/api/history、/api/errors、清理重复方法 |
+| `.claude/CLAUDE.md` | 修改 | 更新架构说明 |
+
+---
+
+## 第九章：V5.2 重构 — 四因子两层判定 (2026-07-07)
+
+### 背景
+
+V5.1 使用 3 因子评分卡（M1=4.5/S3=3.0/V1=2.5，阈值 3.5），单因子 M1 权重占 45%。存在三个结构性问题：缺少量价维度因子（RSI 等指标未纳入），Score 阈值一刀切无法区分信号强度，计算逻辑和模型参数耦合在 V5Detector 类中导致维护困难。
+
+### 设计决策
+
+按外部评审意见的 7 阶段顺序执行：指标收口 → 规则引擎 → DB 扩展 → 消费方改造 → 月审升级 → 切配置 → 清理。核心原则是"统一规则入口"——所有信号判定通过 `evaluate_signal()` 一个函数完成，消费方（tracker/server/dashboard/monthly_audit）只做展示，不理解模型。
+
+V5.2 采用两层判定替代单一 Score 阈值。第一层 n_factors >= 2 做准入（防单因子误触发），第二层按因子组成分级（strong/standard/weak/hold）。Score 降为辅助显示变量。
+
+### 实现细节
+
+**indicators.py** 新建共享指标模块，消除 factor_optimizer.py 和 turning_points.py 中重复的 `_rsi_wilder` 和 `_macd_histogram` 实现。
+
+**rule_registry.py** 新建统一规则引擎。`RULE_DEFS` 定义 4 个因子的完整元数据（名称/维度/条件/显示文本/阈值描述），`MODEL_CONFIGS` 按版本存储模型参数（V5.1 和 V5.2 并存），`evaluate_signal()` 返回 `SignalResult` dataclass，`evaluate_signal_history()` 返回全历史 DataFrame。切换模型版本只需改 `ACTIVE_MODEL_VERSION` 一行。
+
+**db.py** 扩展 signals 表 6 列（model_version/signal_tier/n_factors/is_live_signal/factor_snapshot/l1_triggered），使用 `_ensure_column()` 实现幂等迁移，`get_latest_score` 返回 float，新增 `get_live_signals()` 查询 is_live_signal=1 的记录。
+
+**tracker.py** 完全消费 `evaluate_signal()` 返回的 `SignalResult`，不再自己理解模型。CLI 显示改为 `HOLD [hold] (V5.2)` 格式，Score 去掉 /5。
+
+**server.py** HTML 模板改为动态进度条（替代 5 段固定柱），添加 tier 显示标签。JS render 函数动态计算 `score/max_score*100%` 填充率，阈值线条件渲染（V5.1 画线，V5.2 不画）。API 返回新增 max_score/signal_tier/n_factors/model_version/score_threshold 字段。
+
+**dashboard.py** 替换 V5Detector 为 evaluate_signal + evaluate_signal_history，规则展示从硬编码改为动态读取 rules_status。
+
+**monthly_audit.py** A3 拆分为 A3a（从 SQLite 取 live 信号复盘）和 A3b（用 evaluate_signal_history 做 retrospective replay），新增 A5 按 signal_tier 分组的组合表现表（胜率/平均/中位收益）。所有硬编码的 CURRENT_FACTORS/CURRENT_SCORECARD 替换为 MODEL_CONFIGS 动态查找。Part B 审计建议指向 rule_registry.py 而非 V5Detector。
+
+### 新增/修改文件清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `src/models/indicators.py` | 新增 | 共享技术指标单一来源 |
+| `src/models/rule_registry.py` | 新增 | 统一规则引擎 (RULE_DEFS + MODEL_CONFIGS + evaluate_signal) |
+| `src/models/factor_optimizer.py` | 修改 | 删除重复指标，改用 indicators.py |
+| `src/models/turning_points.py` | 修改 | 删除重复指标，distance_to_trigger/alert_level 支持 config 参数 |
+| `app/db.py` | 修改 | 扩展 6 列 + 幂等迁移 + get_live_signals |
+| `app/tracker.py` | 修改 | 消费 evaluate_signal()，CLI 格式更新 |
+| `app/server.py` | 修改 | 动态进度条 + tier 显示 + API 新字段 |
+| `app/dashboard.py` | 修改 | 替换 V5Detector，动态规则展示 |
+| `app/monthly_audit.py` | 修改 | A3 拆分 + A5 组合表 + MODEL_CONFIGS |
+| `README.md` | 修改 | V5.2 版本描述、架构、审计说明 |
+| `REPORT.md` | 修改 | 方法论报告同步 V5.2 |
+| `.claude/CLAUDE.md` | 修改 | 架构说明和数据流同步 V5.2 |

@@ -51,7 +51,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 def build_dashboard(output_path: str = "dashboard.html"):
     from src.data_fetcher.akshare_source import AKShareSource
-    from src.models.turning_points import V5Detector, collapse_signals
+    from src.models.rule_registry import (
+        evaluate_signal, evaluate_signal_history,
+        MODEL_CONFIGS, ACTIVE_MODEL_VERSION,
+    )
+    from src.models.turning_points import distance_to_trigger, collapse_signals
 
     t0 = time.time()
     print("生成看板...")
@@ -67,37 +71,49 @@ def build_dashboard(output_path: str = "dashboard.html"):
         m = margin_df.set_index("date")["value"].sort_index()
         margin_w = m.resample("W-FRI").last().dropna().shift(1)
 
-    det = V5Detector()
-    df = det.compute(med_w, margin_w=margin_w)
+    config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
+    max_score = config.get("max_score", 10.0)
+
+    # 核心判定
+    result = evaluate_signal(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w)
+    df = evaluate_signal_history(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w)
     latest = df.iloc[-1]
 
-    score = float(latest["score"])
-    if score < 2.5:      pct, label, color = 0, "观望 (0%)", "#9CA3AF"
-    elif score < 3.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
-    elif score < 5.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
-    else:                pct, label, color = 60, "重仓 60% — 多因子触发", "#EF4444"
+    score = result.score
+    tier = result.signal_tier
 
-    from src.models.turning_points import distance_to_trigger
-    dist = distance_to_trigger(df, med_w, margin_w=margin_w)
+    # 仓位建议（基于 tier）
+    tier_map = {
+        "hold": (0, "观望 (0%)", "#9CA3AF"),
+        "weak_armed": (15, "关注区 15%", "#F59E0B"),
+        "standard_armed": (40, "轻仓 40% — Armed", "#F97316"),
+        "strong_armed": (60, "重仓 60% — 多因子触发", "#EF4444"),
+        "armed": (40, "Armed", "#F97316"),  # V5.1 fallback
+    }
+    pct, label, color = tier_map.get(tier, (0, "观望", "#9CA3AF"))
+    # V5.1 兼容: 如果 armed_rule 是 score_threshold, 按 score 判断
+    if config.get("armed_rule") == "score_threshold":
+        if score < 2.5:      pct, label, color = 0, "观望 (0%)", "#9CA3AF"
+        elif score < 3.5:    pct, label, color = 15, "关注区 15%", "#F59E0B"
+        elif score < 5.5:    pct, label, color = 40, "轻仓 40% — Armed", "#F97316"
+        else:                pct, label, color = 60, "重仓 60% — 多因子触发", "#EF4444"
+
+    dist = distance_to_trigger(df, med_w, margin_w=margin_w, config=config)
 
     weekly_data = []
     for i in range(max(0, len(df) - 104), len(df)):
         r = df.iloc[i]
         weekly_data.append({"time": r.name.strftime("%Y-%m-%d"), "value": round(float(r["price"]), 2),
-                            "armed": bool(r["armed"]), "score": int(r["score"])})
+                            "armed": bool(r["armed"]), "score": round(float(r["score"]), 1)})
 
     data_date_str = df.index[-1].strftime("%Y-%m-%d")
 
-    rule_defs = [
-        ("M1:偏度异常(4.5分)", bool(latest["rule_M1"]), f'偏度{latest["skew_13w"]:.2f}', "< -1.5"),
-        ("S3:融资背离(3.0分)", bool(latest.get("rule_S3",0)), "融资+价格新低", "融资逆势加仓"),
-        ("V1:估值冰点(2.5分)", bool(latest["rule_V1"]), f'{latest["val_pct_5y"]:.0f}%', "< 15%"),
-    ]
+    # 因子状态（从 evaluate_signal 的 rules_status 动态生成）
     rules_html = ""
-    for name, ok, val, thresh in rule_defs:
+    for r in result.rules_status:
         rules_html += f"""<div class="rule-row">
-    <div class="rule-icon {'on' if ok else 'off'}">{'Y' if ok else '-'}</div>
-    <div><strong>{name}</strong><br><span style="font-size:11px;color:#6b7280">{val} (阈值: {thresh})</span></div>
+    <div class="rule-icon {'on' if r['triggered'] else 'off'}">{'Y' if r['triggered'] else '-'}</div>
+    <div><strong>{r['name']}</strong><br><span style="font-size:11px;color:#6b7280">{r['value']} (阈值: {r['threshold']})</span></div>
 </div>"""
 
     collapsed = collapse_signals(df["armed"])
@@ -149,7 +165,7 @@ def build_dashboard(output_path: str = "dashboard.html"):
 <div class="card"><div class="position-card">
   <div class="pct" style="color:{color}">{pct}%</div>
   <div class="label">{label}</div>
-  <div style="margin-top:12px"><span class="signal-badge" style="background:{color}">Score {score}/5</span></div>
+  <div style="margin-top:12px"><span class="signal-badge" style="background:{color}">Score {score:.1f} [{tier}]</span></div>
   <div style="margin-top:10px;display:flex;justify-content:center;gap:8px">
     <input type="number" id="trial-price" placeholder="试算点位(如7400)" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;width:150px;font-size:13px">
     <button onclick="trialCalc()" style="padding:6px 14px;background:#3B82F6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">试算</button>
@@ -167,12 +183,12 @@ def build_dashboard(output_path: str = "dashboard.html"):
 <div class="card"><div class="card-title">触发水位线</div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">{waterline_html if waterline_html else '<span style="color:#9ca3af">无法计算</span>'}</div>
 </div>
-<div class="card"><div class="card-title">五规则状态</div>{rules_html}</div>
+<div class="card"><div class="card-title">因子状态</div>{rules_html}</div>
 <div class="card"><div class="card-title">走势图 (黄箭头=Armed | 虚线=水位线)</div><div id="chart"></div></div>
 <div class="card"><div class="card-title">近期 Armed 信号 (* = 入场)</div>
   <table class="rec-table"><tr><th>日期</th><th>Score</th><th>价格</th><th>RSI</th><th>回撤</th><th>入场</th></tr>{armed_html}</table>
 </div>
-<div class="footer">AKShare | V4.4 | 仅供参考</div>
+<div class="footer">AKShare | {ACTIVE_MODEL_VERSION} | 仅供参考</div>
 </div>
 <script>
 try {{
@@ -221,8 +237,7 @@ async function trialCalc() {{
   try {{
     var r = await fetch('/api/signal?price=' + price);
     var d = await r.json();
-    res.innerHTML = 'Score <b>' + d.score + '/5</b> | ' + d.status +
-      ' | D触发价:' + (d.d_trigger||'—') + ' C触发价:' + (d.c_trigger||'—');
+    res.innerHTML = 'Score <b>' + d.score + '</b> [' + (d.signal_tier||'') + '] | ' + (d.alert && d.alert.level || '');
     res.style.color = d.score >= 2 ? '#ef4444' : '#10b981';
   }} catch(e) {{ res.textContent = '计算失败'; }}
 }}
