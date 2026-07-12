@@ -28,7 +28,11 @@ def _load_data() -> dict:
     ak_src = AKShareSource()
     med_df = ak_src.fetch_sw_medical("20180101")
     margin_df = ak_src.fetch_margin_data("20180101")
-    return {"sw_medical": med_df, "total_margin": margin_df}
+    north_df = ak_src.fetch_north_flow("20180101")
+    hs300_df = ak_src.fetch_market_index("hs300", "20180101")
+    m2_df = ak_src.fetch_m2("20180101")
+    return {"sw_medical": med_df, "total_margin": margin_df,
+            "north_flow": north_df, "hs300": hs300_df, "m2": m2_df}
 
 
 def _compute(data: dict, custom_price: float = None) -> dict:
@@ -56,13 +60,31 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         mdf = data["total_margin"].set_index("date")["value"].sort_index()
         margin_w = mdf.resample("W-FRI").last().dropna().shift(1)
 
+    # 外部数据: 北向资金、沪深300、M2
+    north_w = None
+    if "north_flow" in data and not data["north_flow"].empty:
+        ndf = data["north_flow"].set_index("date")["value"].sort_index()
+        north_w = ndf.resample("W-FRI").sum().dropna()
+
+    hs300_w = None
+    if "hs300" in data and not data["hs300"].empty:
+        hdf = data["hs300"].set_index("date")["close"].sort_index()
+        hs300_w = hdf.resample("W-FRI").last().dropna()
+
+    m2_w = None
+    if "m2" in data and not data["m2"].empty:
+        mdf2 = data["m2"].set_index("date")["value"].sort_index()
+        m2_w = mdf2.resample("W-FRI").last().ffill().dropna()
+
     config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
 
     # ── 核心判定：调用 evaluate_signal() ──
-    result = evaluate_signal(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w)
+    result = evaluate_signal(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w,
+                             north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
 
     # 构建 df 用于图表 / 历史信号显示
-    df = evaluate_signal_history(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w)
+    df = evaluate_signal_history(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w,
+                                  north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
 
     # Distance to trigger（传入 config，V5.2 会额外计算 L1/M1）
     dist = distance_to_trigger(df, med_w, margin_w=margin_w, config=config)

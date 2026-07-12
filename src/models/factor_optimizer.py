@@ -20,9 +20,16 @@ from src.models.indicators import rsi_wilder, macd_histogram
 # ═══════════════════════════════════════════
 
 def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
-                      pe_w: pd.Series = None, margin_w: pd.Series = None) -> pd.DataFrame:
+                      pe_w: pd.Series = None, margin_w: pd.Series = None,
+                      north_w: pd.Series = None, hs300_w: pd.Series = None,
+                      m2_w: pd.Series = None) -> pd.DataFrame:
     """
-    构建四维度候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
+    构建候选因子池。所有因子二值化(1/0)，仅用T日及以前数据。
+
+    新增外部因子参数:
+        north_w: 北向资金周频净流入(亿元), 日频求和得到
+        hs300_w: 沪深300周频收盘价
+        m2_w:    M2同比增速(%), 月频前向填充到周频
     """
     pool = pd.DataFrame(index=med_w.index)
 
@@ -88,6 +95,29 @@ def build_factor_pool(med_w: pd.Series, vol_w: pd.Series = None,
         pool["S3_margin_diverge"] = (
             (price_13w_low == 1) & (margin_chg_4w > 0)
         ).astype(int)
+
+    # ── 维度5: 外部环境 (External) ──
+
+    # S4: 北向资金背离 (价格13周新低 + 北向4周净流入>0)
+    if north_w is not None and len(north_w.dropna()) > 20:
+        north_aligned = north_w.reindex(med_w.index).ffill()
+        price_13w_low = (med_w == med_w.rolling(13).min()).astype(int)
+        north_net_4w = north_aligned.rolling(4).sum()
+        pool["S4_north_diverge"] = (
+            (price_13w_low == 1) & (north_net_4w > 0)
+        ).astype(int)
+
+    # E1: 大盘熊市 (HS300 < 200日均线, 系统性恐慌放大底部信号)
+    if hs300_w is not None and len(hs300_w.dropna()) > 200:
+        hs300_aligned = hs300_w.reindex(med_w.index).ffill()
+        hs300_ma200 = hs300_aligned.rolling(200, min_periods=100).mean()
+        pool["E1_market_bear"] = (hs300_aligned < hs300_ma200).astype(int)
+
+    # E2: M2加速 (当前M2增速 > 近13周均值, 货币宽松环境)
+    if m2_w is not None and len(m2_w.dropna()) > 20:
+        m2_aligned = m2_w.reindex(med_w.index).ffill()
+        m2_ma13 = m2_aligned.rolling(13, min_periods=4).mean()
+        pool["E2_m2_accel"] = (m2_aligned > m2_ma13).astype(int)
 
     return pool.fillna(0).astype(int)
 
@@ -298,7 +328,9 @@ def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
 # ═══════════════════════════════════════════
 
 def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
-                       pe_w: pd.Series = None, margin_w: pd.Series = None) -> dict:
+                       pe_w: pd.Series = None, margin_w: pd.Series = None,
+                       north_w: pd.Series = None, hs300_w: pd.Series = None,
+                       m2_w: pd.Series = None) -> dict:
     """执行完整五阶段优化, 返回所有结果"""
     print("=" * 60)
     print("  V5.0 因子自动筛选与赋权框架")
@@ -306,7 +338,8 @@ def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
 
     # 阶段1
     print("\n[阶段1] 构建候选因子池...")
-    pool = build_factor_pool(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w)
+    pool = build_factor_pool(med_w, vol_w=vol_w, pe_w=pe_w, margin_w=margin_w,
+                             north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
     print(f"  候选因子: {len(pool.columns)} 个")
 
     # 阶段2

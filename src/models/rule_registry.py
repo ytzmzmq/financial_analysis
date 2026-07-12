@@ -70,6 +70,39 @@ RULE_DEFS: dict[str, dict] = {
         "threshold_display": "< 15%分位",
         "raw_value_key": "val_pct_5y",
     },
+    "S4_north_diverge": {
+        "dimension": "SmartMoney",
+        "indicator": "north_diverge",
+        "params": {"price_window": 13, "north_window": 4},
+        "condition": "price_13w_low AND north_4w_net_positive",
+        "pool_column": "S4_north_diverge",
+        "display_text": "S4:北向背离({weight}分)",
+        "description": "价格13周新低 + 北向4周净流入",
+        "threshold_display": "价新低+北向流入",
+        "raw_value_key": None,
+    },
+    "E1_market_bear": {
+        "dimension": "External",
+        "indicator": "market_regime",
+        "params": {"ma_window": 200},
+        "condition": "HS300 < 200日均线",
+        "pool_column": "E1_market_bear",
+        "display_text": "E1:大盘熊市({weight}分)",
+        "description": "沪深300低于200日均线, 系统性恐慌",
+        "threshold_display": "< MA200",
+        "raw_value_key": None,
+    },
+    "E2_m2_accel": {
+        "dimension": "External",
+        "indicator": "m2_growth",
+        "params": {"ma_window": 13},
+        "condition": "M2增速 > 13周均值",
+        "pool_column": "E2_m2_accel",
+        "display_text": "E2:M2加速({weight}分)",
+        "description": "M2同比增速超过近13周均值, 货币宽松",
+        "threshold_display": "> MA13",
+        "raw_value_key": None,
+    },
 }
 
 
@@ -157,6 +190,9 @@ def evaluate_signal(
     margin_w: Optional[pd.Series] = None,
     vol_w: Optional[pd.Series] = None,
     pool: Optional[pd.DataFrame] = None,
+    north_w: Optional[pd.Series] = None,
+    hs300_w: Optional[pd.Series] = None,
+    m2_w: Optional[pd.Series] = None,
 ) -> SignalResult:
     """
     统一信号判定入口。所有地方都不要自己算 Armed，统一走这个函数。
@@ -179,7 +215,8 @@ def evaluate_signal(
 
     # 构建或复用因子池
     if pool is None:
-        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
+        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                                 north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
 
     latest = med_w.iloc[-1]
     date_str = str(med_w.index[-1].date())
@@ -279,6 +316,9 @@ def evaluate_signal_history(
     med_w: pd.Series,
     margin_w: Optional[pd.Series] = None,
     vol_w: Optional[pd.Series] = None,
+    north_w: Optional[pd.Series] = None,
+    hs300_w: Optional[pd.Series] = None,
+    m2_w: Optional[pd.Series] = None,
 ) -> pd.DataFrame:
     """
     对历史每一周执行 evaluate_signal，返回完整 DataFrame。
@@ -295,7 +335,8 @@ def evaluate_signal_history(
     config = MODEL_CONFIGS[model_version]
     factors_config = config["factors"]
 
-    pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
+    pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                             north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
 
     df = pd.DataFrame(index=med_w.index)
     df["price"] = med_w

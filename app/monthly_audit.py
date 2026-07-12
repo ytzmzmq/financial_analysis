@@ -39,11 +39,14 @@ from app.db import get_live_signals
 
 
 def _load_data():
-    """拉取所有可用数据（价格 + 融资 + 成交量）"""
+    """拉取所有可用数据（价格 + 融资 + 成交量 + 外部因子）"""
     from src.data_fetcher.akshare_source import AKShareSource
     ak = AKShareSource()
     med_df = ak.fetch_sw_medical("20180101")
     margin_df = ak.fetch_margin_data("20180101")
+    north_df = ak.fetch_north_flow("20180101")
+    hs300_df = ak.fetch_market_index("hs300", "20180101")
+    m2_df = ak.fetch_m2("20180101")
 
     med = med_df.set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
@@ -59,21 +62,39 @@ def _load_data():
         vdf = med_df.set_index("date")["volume"].sort_index()
         vol_w = vdf.resample("W-FRI").sum().dropna()
 
-    return med_w, margin_w, vol_w
+    # 外部因子数据
+    north_w = None
+    if north_df is not None and not north_df.empty:
+        ndf = north_df.set_index("date")["value"].sort_index()
+        north_w = ndf.resample("W-FRI").sum().dropna()
+
+    hs300_w = None
+    if hs300_df is not None and not hs300_df.empty:
+        hdf = hs300_df.set_index("date")["close"].sort_index()
+        hs300_w = hdf.resample("W-FRI").last().dropna()
+
+    m2_w = None
+    if m2_df is not None and not m2_df.empty:
+        mdf2 = m2_df.set_index("date")["value"].sort_index()
+        m2_w = mdf2.resample("W-FRI").last().ffill().dropna()
+
+    return med_w, margin_w, vol_w, north_w, hs300_w, m2_w
 
 
 # ═══════════════════════════════════════════
 # Part A: 稳健性检验
 # ═══════════════════════════════════════════
 
-def _check_rolling_stability(med_w, margin_w, vol_w=None):
+def _check_rolling_stability(med_w, margin_w, vol_w=None,
+                             north_w=None, hs300_w=None, m2_w=None):
     """对比近3年 vs 全历史的因子条件收益"""
     from src.models.factor_optimizer import build_factor_pool
 
     config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
     factor_names = list(config["factors"].keys())
 
-    pool_full = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
+    pool_full = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                                  north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
     fwd_ret = med_w.pct_change(13).shift(-13) * 100
 
     cutoff = med_w.index[-1] - pd.DateOffset(years=3)
@@ -175,25 +196,27 @@ def _signal_quality_live(med_w):
 
         records.append({
             "日期": date_str,
-            "Score": round(float(r.get("score", 0)), 1),
-            "价格": round(float(r.get("price", 0)), 0),
-            "Tier": r.get("signal_tier", ""),
+            "Score": round(float(r["score"] or 0), 1),
+            "价格": round(float(r["price"] or 0), 0),
+            "Tier": r.get("signal_tier") or "",
             "13周后收益": round(fwd_ret, 1) if not np.isnan(fwd_ret) else None,
             "结果": "盈利" if not np.isnan(fwd_ret) and fwd_ret > 0
                     else ("亏损" if not np.isnan(fwd_ret) else "待验证"),
-            "model_version": r.get("model_version", ""),
+            "model_version": r.get("model_version") or "",
         })
 
     return pd.DataFrame(records)
 
 
-def _signal_quality_replay(med_w, margin_w, vol_w=None):
+def _signal_quality_replay(med_w, margin_w, vol_w=None,
+                           north_w=None, hs300_w=None, m2_w=None):
     """A3b: 用当前模型对全历史做 retrospective replay
 
     回答: "如果从头到尾用当前模型，历史上 Armed 信号表现如何？"
     """
     df = evaluate_signal_history(ACTIVE_MODEL_VERSION, med_w,
-                                  margin_w=margin_w, vol_w=vol_w)
+                                  margin_w=margin_w, vol_w=vol_w,
+                                  north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
     fwd = med_w.pct_change(13).shift(-13) * 100
 
     armed_df = df[df["armed"] == 1].copy()
@@ -237,7 +260,8 @@ def _signal_quality_replay(med_w, margin_w, vol_w=None):
     return out, summary
 
 
-def _check_correlation(med_w, margin_w, vol_w=None):
+def _check_correlation(med_w, margin_w, vol_w=None,
+                       north_w=None, hs300_w=None, m2_w=None):
     """因子间相关性分析 — 检查多重共线性风险
 
     两个层面:
@@ -247,7 +271,8 @@ def _check_correlation(med_w, margin_w, vol_w=None):
     """
     from src.models.factor_optimizer import build_factor_pool
 
-    pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
+    pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                             north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
     factors = pool.columns.tolist()
 
     # ── 1. 条件概率矩阵 ──
@@ -298,14 +323,16 @@ def _check_correlation(med_w, margin_w, vol_w=None):
 # Part B: 新因子发现
 # ═══════════════════════════════════════════
 
-def _run_factor_discovery(med_w, margin_w, vol_w=None):
+def _run_factor_discovery(med_w, margin_w, vol_w=None,
+                          north_w=None, hs300_w=None, m2_w=None):
     """运行全因子优化流水线，对比当前模型"""
     from src.models.factor_optimizer import run_full_pipeline
 
     config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
     current_factors = list(config["factors"].keys())
 
-    results = run_full_pipeline(med_w, vol_w=vol_w, margin_w=margin_w)
+    results = run_full_pipeline(med_w, vol_w=vol_w, margin_w=margin_w,
+                                north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
 
     if not results:
         return {"status": "无因子通过筛选", "screened": None, "scoring": None, "final_factors": []}
@@ -329,7 +356,8 @@ def _run_factor_discovery(med_w, margin_w, vol_w=None):
     }
 
 
-def _combination_performance(med_w, margin_w, vol_w=None):
+def _combination_performance(med_w, margin_w, vol_w=None,
+                             north_w=None, hs300_w=None, m2_w=None):
     """A5: 按 signal_tier 分组的组合表现表
 
     对全历史做 evaluate_signal_history，按 tier 统计：
@@ -338,7 +366,8 @@ def _combination_performance(med_w, margin_w, vol_w=None):
     - 胜率
     """
     df = evaluate_signal_history(ACTIVE_MODEL_VERSION, med_w,
-                                  margin_w=margin_w, vol_w=vol_w)
+                                  margin_w=margin_w, vol_w=vol_w,
+                                  north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
     fwd = med_w.pct_change(13).shift(-13) * 100
 
     # 去重: 同一 tier 连续触发只保留第一周
@@ -397,7 +426,8 @@ def _df_to_md(df, max_rows=20):
     return df.head(max_rows).to_markdown(index=False) + "\n"
 
 
-def generate_report(med_w, margin_w, vol_w=None):
+def generate_report(med_w, margin_w, vol_w=None,
+                    north_w=None, hs300_w=None, m2_w=None):
     """执行全部审计项目，返回 markdown 报告"""
     config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
     factor_names = list(config["factors"].keys())
@@ -422,7 +452,8 @@ def generate_report(med_w, margin_w, vol_w=None):
     # A1: 滚动窗口稳定性
     print("  [A1] 滚动窗口稳定性检验...")
     try:
-        stability_df = _check_rolling_stability(med_w, margin_w, vol_w)
+        stability_df = _check_rolling_stability(med_w, margin_w, vol_w,
+                                                 north_w, hs300_w, m2_w)
         lines.append("### A1. 滚动窗口稳定性 (近3年 vs 全历史)\n")
         lines.append(_df_to_md(stability_df))
     except Exception as e:
@@ -432,7 +463,8 @@ def generate_report(med_w, margin_w, vol_w=None):
     print("  [A2] 触发频率漂移检验...")
     try:
         from src.models.factor_optimizer import build_factor_pool
-        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w)
+        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                                   north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
         freq_df = _check_frequency_drift(pool)
         lines.append("### A2. 触发频率漂移\n")
         lines.append(_df_to_md(freq_df))
@@ -455,7 +487,8 @@ def generate_report(med_w, margin_w, vol_w=None):
     # A3b: 模型回算（retrospective replay）
     print("  [A3b] 模型回算 (retrospective replay)...")
     try:
-        replay_result = _signal_quality_replay(med_w, margin_w, vol_w)
+        replay_result = _signal_quality_replay(med_w, margin_w, vol_w,
+                                                north_w, hs300_w, m2_w)
         if isinstance(replay_result, tuple):
             replay_df, replay_summary = replay_result
             lines.append(f"### A3b. 模型回算 ({ACTIVE_MODEL_VERSION} retrospective)\n")
@@ -474,7 +507,8 @@ def generate_report(med_w, margin_w, vol_w=None):
     # A4: 因子相关性 / 多重共线性
     print("  [A4] 因子相关性分析...")
     try:
-        pairs_df, cont_corr = _check_correlation(med_w, margin_w, vol_w)
+        pairs_df, cont_corr = _check_correlation(med_w, margin_w, vol_w,
+                                                   north_w, hs300_w, m2_w)
         lines.append("### A4. 因子间相关性 (多重共线性检查)\n")
         lines.append("去重机制: 条件概率 P(A|B) > 0.65 时淘汰 Uplift 更低的因子 (阶段3)。\n")
         if len(pairs_df) > 0:
@@ -504,7 +538,8 @@ def generate_report(med_w, margin_w, vol_w=None):
     # A5: 组合表现表
     print("  [A5] 组合表现表...")
     try:
-        combo_df = _combination_performance(med_w, margin_w, vol_w)
+        combo_df = _combination_performance(med_w, margin_w, vol_w,
+                                             north_w, hs300_w, m2_w)
         lines.append("### A5. 组合表现 (按 signal_tier 分组, 去重机会级)\n")
         if len(combo_df) > 0:
             lines.append(_df_to_md(combo_df))
@@ -519,7 +554,8 @@ def generate_report(med_w, margin_w, vol_w=None):
 
     print("  [B] 运行全因子优化流水线...")
     try:
-        discovery = _run_factor_discovery(med_w, margin_w, vol_w)
+        discovery = _run_factor_discovery(med_w, margin_w, vol_w,
+                                           north_w, hs300_w, m2_w)
 
         if discovery["status"] != "完成":
             lines.append(f"**{discovery['status']}**\n")
@@ -573,7 +609,7 @@ def main():
 
     print("\n[1/3] 拉取数据...")
     try:
-        med_w, margin_w, vol_w = _load_data()
+        med_w, margin_w, vol_w, north_w, hs300_w, m2_w = _load_data()
         print(f"  指数: {len(med_w)} 周" + (f", 成交量: {len(vol_w)} 周" if vol_w is not None else ""))
     except Exception as e:
         err_msg = f"月度审计: 数据拉取失败 — {e}"
@@ -582,7 +618,7 @@ def main():
         return
 
     print("\n[2/3] 执行审计...")
-    report = generate_report(med_w, margin_w, vol_w)
+    report = generate_report(med_w, margin_w, vol_w, north_w, hs300_w, m2_w)
 
     print(f"\n[3/3] 写入报告...")
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
