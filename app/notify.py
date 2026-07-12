@@ -1,11 +1,14 @@
 """
-推送通知模块 — 支持多种推送渠道
+推送通知模块 — Windows 桌面通知 + 远程推送
+
+渠道优先级: Windows Toast (本地) → Server酱 / PushDeer / Webhook (远程, 可选)
 
 用法:
     python app/notify.py                    # 运行 tracker 并在有警报时推送
     python app/notify.py --dry-run          # 仅打印，不实际推送
+    python app/notify.py --test             # 发送测试通知
 
-环境变量 (可选, 不设置则仅打印):
+远程推送环境变量 (可选, 不设置则仅桌面通知):
     PUSH_KEY       Server酱 SendKey (https://sct.ftqq.com/)
     PUSHDEER_KEY   PushDeer pushkey
     WEBHOOK_URL    自定义 Webhook URL (POST JSON)
@@ -18,6 +21,22 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+def push_toast(title: str, content: str) -> bool:
+    """Windows 桌面通知 (通过 plyer, 无需任何 API Key)"""
+    try:
+        from plyer import notification
+        notification.notify(
+            title=title[:100],
+            message=content[:256],
+            app_name="医药板块监控器",
+            timeout=10,
+        )
+        return True
+    except Exception as e:
+        print(f"  [Toast] Failed: {e}")
+        return False
 
 
 def push_serverchan(title: str, content: str, push_key: str = None) -> bool:
@@ -66,9 +85,9 @@ def push_webhook(title: str, content: str, webhook_url: str = None) -> bool:
 
 
 def push(title: str, content: str) -> bool:
-    """尝试所有渠道"""
+    """尝试所有渠道: 桌面通知优先，再尝试远程推送"""
     sent = False
-    for fn in [push_serverchan, push_pushdeer, push_webhook]:
+    for fn in [push_toast, push_serverchan, push_pushdeer, push_webhook]:
         if fn(title, content):
             sent = True
     # GitHub Actions: 输出到 workflow summary
@@ -83,6 +102,13 @@ def run(dry_run: bool = False, test_push: bool = False):
     """主入口：计算信号 + 按需推送"""
     from app.tracker import _compute, _load_data
 
+    # Windows 控制台可能使用 GBK，无法打印 emoji，强制切 UTF-8
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     # 测试模式：强制发送测试推送
     if test_push:
         title = "测试推送 — 医药板块监控器"
@@ -91,15 +117,16 @@ def run(dry_run: bool = False, test_push: bool = False):
         if not dry_run:
             sent = push(title, content)
             if sent:
-                print("  测试推送已发送！请检查微信/手机是否收到。")
+                print("  测试推送已发送！请检查是否收到桌面通知或手机推送。")
             else:
-                print("  推送失败！请检查 PUSH_KEY 是否正确设置。")
-                print(f"  当前 PUSH_KEY: {'已设置' if os.environ.get('PUSH_KEY') else '未设置'}")
+                print("  推送失败！请检查系统通知设置或 PUSH_KEY 是否正确。")
         else:
             print(f"  [dry-run] 标题: {title}\n  内容: {content}")
         return
 
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 运行监控...")
+    now = datetime.now()
+    weekday_cn = "一二三四五六日"[now.weekday()]
+    print(f"[{now.strftime('%Y-%m-%d')} 周{weekday_cn} {now.strftime('%H:%M:%S')}] 运行监控...")
     try:
         sig = _compute(_load_data())
     except Exception as e:
@@ -108,33 +135,38 @@ def run(dry_run: bool = False, test_push: bool = False):
         return
     alert = sig["alert"]
     score = sig["score"]
+    tier = sig.get("signal_tier", "")
+    n_factors = sig.get("n_factors", 0)
+    max_score = sig.get("max_score", 5)
+    model_ver = sig.get("model_version", "")
 
-    # 构建推送内容
+    # 构建推送内容 (V5.2 格式)
     lines = [
         f"日期: {sig['date']}",
         f"指数: {sig['price']:.0f}",
-        f"Score: {score}/5",
+        f"Score: {score}/{max_score}  ({n_factors}个因子触发)",
+        f"分级: {tier}  模型: {model_ver}",
         f"警报: [{alert['level'].upper()}] {alert['message']}",
         "",
         "--- 距离触发 ---",
     ]
-    for key in ["D", "C"]:
-        d = sig["distance_to_trigger"][key]
+    for key, d in sig["distance_to_trigger"].items():
         if d["triggered"]:
             lines.append(f"{d['name']}: 已触发")
-        elif d.get("trigger_price"):
+        elif d.get("trigger_price") is not None:
             lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f} (距当前 {d['pct_away']:+.1f}%)")
     content = "\n".join(lines)
 
     # 根据警报级别决定是否推送
     level = alert["level"]
     if level == "silent":
-        print(f"  Score={score} [{level}] — 静默, 不推送")
+        print(f"  Score={score:.1f} [{tier}] [{level}] — 静默, 不推送")
         return
 
     # YELLOW 或 RED: 推送
     emoji = "🔴" if level == "red" else "🟡"
-    title = f"{emoji} 医药板块{'ARMED!' if level == 'red' else '近触发预警'} (Score={score})"
+    tier_label = tier.replace("_", " ").title()
+    title = f"{emoji} 医药板块{'ARMED!' if level == 'red' else '近触发预警'} [{tier_label}] (Score={score:.1f})"
 
     print(f"  [{level.upper()}] {alert['message']}")
     print(f"  推送标题: {title}")
@@ -144,7 +176,7 @@ def run(dry_run: bool = False, test_push: bool = False):
         if sent:
             print("  推送已发送")
         else:
-            print("  未配置推送渠道 (设置 PUSH_KEY / PUSHDEER_KEY / WEBHOOK_URL 环境变量)")
+            print("  未配置推送渠道 (桌面通知需要 plyer, 远程推送需设置 PUSH_KEY 等环境变量)")
     else:
         print("  [dry-run] 跳过推送")
         print(content)

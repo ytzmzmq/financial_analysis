@@ -190,12 +190,21 @@ def get_history(limit=100):
     return [dict(r) for r in rows]
 
 
-def get_latest_score():
-    """获取最近一条记录的 score（用于 prev_score 计算），无记录返回 0.0"""
+def get_latest_score(before_date: str = None):
+    """获取最近一条记录的 score（用于 prev_score 计算），无记录返回 0.0
+
+    before_date: 可选，只查询此日期之前的记录（排除当天刚写入的数据）
+    """
     conn = _get_conn()
-    row = conn.execute(
-        "SELECT score FROM signals ORDER BY date DESC LIMIT 1"
-    ).fetchone()
+    if before_date:
+        row = conn.execute(
+            "SELECT score FROM signals WHERE date < ? ORDER BY date DESC LIMIT 1",
+            (before_date,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT score FROM signals ORDER BY date DESC LIMIT 1"
+        ).fetchone()
     conn.close()
     if row:
         return float(row[0])

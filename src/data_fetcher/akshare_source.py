@@ -8,7 +8,7 @@ except ImportError:
     ak = None
 
 def fetch_realtime_price() -> float | None:
-    """通过 Sina 抓取 512170(医疗ETF) 实时价, 映射到 801150"""
+    """[Deprecated] 旧版: 通过 512170 ETF 代理获取涨跌幅"""
     import urllib.request
     try:
         req = urllib.request.Request(
@@ -20,7 +20,30 @@ def fetch_realtime_price() -> float | None:
         prev_close = float(parts[2])  # 昨收
         if prev_close > 0:
             pct = (current / prev_close - 1)
-            return pct  # 返回涨跌幅, 由调用方乘以801150昨收
+            return pct  # 返回涨跌幅
+    except Exception:
+        pass
+    return None
+
+
+def fetch_realtime_sw_index(symbol: str = "801150") -> dict | None:
+    """通过 AKShare index_min_sw 获取申万指数实时价格
+
+    Returns:
+        dict with 'date' (datetime), 'price' (float), or None on failure
+    """
+    if ak is None:
+        return None
+    try:
+        df = ak.index_min_sw(symbol=symbol)
+        if df is not None and not df.empty:
+            # 列名可能是乱码(GBK编码), 按位置重命名
+            df.columns = ["code", "name", "price", "date", "time"]
+            latest = df.iloc[-1]
+            return {
+                "date": pd.Timestamp(latest["date"]),
+                "price": float(latest["price"]),
+            }
     except Exception:
         pass
     return None
@@ -35,7 +58,7 @@ class AKShareSource:
     # ── 申万医药生物指数 ──
     def fetch_sw_medical(self, start_date: str = "20180101",
                          end_date: str | None = None) -> pd.DataFrame:
-        """获取申万医药生物指数(801150)日线，用 ETF 代理映射盘中实时价格"""
+        """获取申万医药生物指数(801150)日线，用 index_min_sw 获取实时价格"""
         if ak is None:
             raise ImportError("akshare not installed")
 
@@ -47,18 +70,49 @@ class AKShareSource:
         })
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
-        # ETF 实时映射: Sina 抓 512170 涨跌幅 → 映射到 801150
+        # 2. 实时/最新数据 + 缺失日回补
+        #    策略: index_min_sw(真实行情) > 前收顺延(补缺日) > ETF代理(兜底)
         try:
             today = pd.Timestamp.today().normalize()
-            if today.weekday() < 5 and df.iloc[-1]["date"] < today:
+            last_date = df.iloc[-1]["date"]
+            last_close = float(df.iloc[-1]["close"])
+            rt = fetch_realtime_sw_index("801150")
+            rt_date = rt["date"].normalize() if rt else None
+            rt_price = rt["price"] if rt else None
+
+            # 2a. 回补中间缺失交易日（index_hist_sw 延迟导致的空白）
+            #     用前一日收盘价顺延——周线 resample("W-FRI").last() 只取周内最后一天，
+            #     顺延值不影响周信号；等 index_hist_sw 刷新后自动纠正
+            gap_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1),
+                                       end=today - pd.Timedelta(days=1))
+            if len(gap_dates) > 0:
+                gap_rows = [{"date": d, "close": last_close, "open": last_close,
+                             "high": last_close, "low": last_close,
+                             "volume": 0, "amount": 0} for d in gap_dates]
+                df = pd.concat([df, pd.DataFrame(gap_rows)], ignore_index=True)
+                print(f"[AKShare] 回补缺失日: {len(gap_dates)}天 ({gap_dates[0].date()}~{gap_dates[-1].date()})")
+
+            # 2b. 今天的数据
+            if rt_date and rt_price and rt_price > 0:
+                if rt_date > last_date and rt_date not in df["date"].values:
+                    df = pd.concat([df, pd.DataFrame([{
+                        "date": rt_date, "close": rt_price, "open": rt_price,
+                        "high": rt_price, "low": rt_price, "volume": 0, "amount": 0
+                    }])], ignore_index=True)
+                    print(f"[AKShare] SW实时(追加): 801150={rt_price:.2f} ({rt_date.date()})")
+                elif rt_date in df["date"].values:
+                    df.loc[df["date"] == rt_date, "close"] = rt_price
+                    print(f"[AKShare] SW实时(覆盖): 801150={rt_price:.2f}")
+            elif today.weekday() < 5 and today not in df["date"].values:
+                # index_min_sw 不可用且工作日缺数据 → ETF 代理兜底
                 pct = fetch_realtime_price()
                 if pct is not None:
-                    rt = df.iloc[-1]["close"] * (1 + pct)
+                    estimated = last_close * (1 + pct)
                     df = pd.concat([df, pd.DataFrame([{
-                        "date": today, "close": rt, "open": rt,
-                        "high": rt, "low": rt, "volume": 0, "amount": 0
+                        "date": today, "close": estimated, "open": estimated,
+                        "high": estimated, "low": estimated, "volume": 0, "amount": 0
                     }])], ignore_index=True)
-                    print(f"[AKShare] ETF实时: 512170涨跌{pct*100:+.2f}% → 801150={rt:.2f}")
+                    print(f"[AKShare] ETF代理(fallback): 512170涨跌{pct*100:+.2f}% → 801150≈{estimated:.2f}")
         except Exception:
             pass
 

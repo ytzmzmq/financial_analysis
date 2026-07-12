@@ -5,9 +5,10 @@
 ## 快速开始
 
 ```bash
-pip install pandas numpy scipy akshare openpyxl
+pip install pandas numpy scipy akshare openpyxl plyer
 
 python app/tracker.py          # CLI 查看当前信号
+python app/notify.py --test    # 测试桌面通知
 python app/server.py           # 启动实时看板 http://127.0.0.1:8888
 python app/monthly_audit.py    # 生成月度因子审计报告
 ```
@@ -24,11 +25,11 @@ app/
   server.py           HTTP 看板服务器 (stdlib http.server, 无框架依赖)
   db.py               SQLite 存储：signals 表(信号历史) + system_log 表(错误日志)
   dashboard.py        生成自包含 HTML 看板(离线可用)
-  notify.py           微信推送(Server酱/PushDeer/Webhook)
+  notify.py           Windows 桌面通知(plyer) + 远程推送(Server酱/PushDeer/Webhook)
   monthly_audit.py    月度因子审计：稳健性检验 + 新因子发现
   ci_parse.py         GitHub Actions 输出解析
 
-run_tracker.bat       Windows 任务计划用，每天 14:45 执行 tracker.py
+run_tracker.bat       Windows 任务计划用，每天 14:45 执行 notify.py（信号计算 + 桌面通知）
 run_audit.bat         Windows 任务计划用，每月 1 号 09:00 执行审计
 
 src/
@@ -36,7 +37,7 @@ src/
   models/indicators.py        共享技术指标（rsi_wilder, macd_histogram 单一来源）
   models/turning_points.py    distance_to_trigger + alert_level + Triple Barrier
   models/factor_optimizer.py  五阶段因子筛选框架
-  data_fetcher/akshare_source.py  AKShare 数据源(含 Sina ETF 实时代理)
+  data_fetcher/akshare_source.py  AKShare 数据源(index_min_sw 实时 + ETF代理兜底)
   data_fetcher/fred_source.py     FRED 美国宏观数据
 
 data/processed/
@@ -46,14 +47,14 @@ data/processed/
   audit_log.txt       审计执行日志
 ```
 
-数据存储全部本地化：信号历史写入 SQLite（`data/processed/signals.db`），错误日志也写同一张库的 system_log 表。旧的 `signal_history.csv` 在首次运行时自动导入 SQLite，之后不再使用。
+数据存储全部本地化：信号历史写入 SQLite（`data/processed/signals.db`），错误日志也写同一张库的 system_log 表。旧的 `signal_history.csv` 在首次运行时自动导入 SQLite，之后不再使用。实时价格优先通过 `index_min_sw` 获取申万指数直接行情，不可用时回退到 512170 ETF 涨跌幅代理。
 
 ## 定时任务
 
 两个 Windows 任务计划程序条目，全免费，不需要服务器：
 
 ```bash
-# 每天 14:45 自动跑 tracker，信号写入 SQLite
+# 每天 14:45 自动跑 tracker，信号写入 SQLite + 桌面通知
 schtasks /create /tn "医药板块Tracker" /tr "<项目路径>\run_tracker.bat" /sc daily /st 14:45 /rl highest
 
 # 每月 1 号 09:00 跑因子审计，报告输出到 data/processed/audit_report.md

@@ -67,13 +67,12 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     # Distance to trigger（传入 config，V5.2 会额外计算 L1/M1）
     dist = distance_to_trigger(df, med_w, margin_w=margin_w, config=config)
 
-    # 获取上一次 score（用于 alert_level 计算）
-    prev_score = get_latest_score()
+    # 获取上一次 score（用于 alert_level 计算，排除当天数据）
+    today_str = str(med_w.index[-1].date())
+    prev_score = get_latest_score(before_date=today_str)
 
     # Alert level（传入 config，V5.2 按 tier 判定）
     alert = alert_level(df, prev_score, config=config)
-
-    today_str = str(med_w.index[-1].date())
 
     # 持久化到 SQLite（试算模式不写入）
     if custom_price is None:
