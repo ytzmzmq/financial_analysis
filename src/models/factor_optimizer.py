@@ -2,7 +2,7 @@
 V5.0 因子自动筛选与赋权框架
 
 五阶段:
-  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney, 二值化, 无look-ahead)
+  1. 候选因子池 (Valuation/Liquidity/Momentum/SmartMoney/External, 二值化, 无look-ahead)
   2. 单因子三漏斗检验 (稀疏度2-15% + 收益>5% + Uplift CI下限>1%)
   3. 条件概率去重 (P(A|B)>0.65则保留Uplift下限更高的)
   4. Uplift驱动离散评分卡 (0.5步长, 满分10)
@@ -13,6 +13,19 @@ import numpy as np
 from scipy.stats import percentileofscore
 
 from src.models.indicators import rsi_wilder, macd_histogram
+
+
+# ═══════════════════════════════════════════
+# 健康监测层 — 行动建议映射
+# ═══════════════════════════════════════════
+
+HEALTH_ACTIONS = {
+    "Stable":             "保持当前权重",
+    "Regime-dependent":   "继续观察，不调整权重",
+    "Declining":          "重点监测，下次审计复查",
+    "Unstable":           "进入 V5.3 候选淘汰列表",
+    "Insufficient":       "数据不足，暂不评估",
+}
 
 
 # ═══════════════════════════════════════════
@@ -142,6 +155,337 @@ def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
         means.append(np.mean(data[idx]))
     means = np.array(means)
     return (np.percentile(means, 2.5), np.percentile(means, 97.5))
+
+
+def temporal_stability(factor: pd.Series, med_w: pd.Series,
+                       forward_weeks: int = 13,
+                       n_windows: int = 4,
+                       overlap: float = 0.5,
+                       min_signals_per_window: int = 3) -> dict:
+    """滚动窗口 uplift 计算（纯计算，不含 Grade 判定）。
+
+    将全历史切成 n_windows 个重叠窗口，每个窗口独立计算 uplift 和触发数。
+    返回原始窗口数据，由 factor_health_analysis() 做 evidence-based 综合评估。
+
+    Returns:
+        dict with window_uplifts, n_pass, pass_ratio,
+        total_triggers, trigger_cv, window_details
+    """
+    n_total = len(factor)
+    total_triggers = int((factor == 1).sum())
+    effective_cover = (n_windows - 1) * (1 - overlap) + 1
+    window_size = max(int(n_total / effective_cover),
+                      forward_weeks + min_signals_per_window + 10)
+    stride = max(int(window_size * (1 - overlap)), 1)
+
+    window_uplifts = []
+    window_details = []
+
+    for i in range(n_windows):
+        start = i * stride
+        end = min(start + window_size, n_total)
+        if end - start < forward_weeks + min_signals_per_window:
+            break
+
+        w_rets = np.array([
+            (med_w.iloc[j + forward_weeks] / med_w.iloc[j] - 1) * 100
+            for j in range(start, end - forward_weeks)
+        ])
+        if len(w_rets) == 0:
+            continue
+        e_uncond_w = np.mean(w_rets)
+
+        triggered_rets = []
+        for j in range(start, end - forward_weeks):
+            if factor.iloc[j] == 1:
+                triggered_rets.append(
+                    (med_w.iloc[j + forward_weeks] / med_w.iloc[j] - 1) * 100
+                )
+
+        n_trig = len(triggered_rets)
+        if n_trig >= min_signals_per_window:
+            e_cond_w = np.mean(triggered_rets)
+            uplift_w = e_cond_w - e_uncond_w
+        else:
+            uplift_w = np.nan
+
+        window_uplifts.append(uplift_w)
+        window_details.append({
+            "window": i,
+            "start_idx": start,
+            "end_idx": end,
+            "n_signals": n_trig,
+            "uplift": uplift_w,
+        })
+
+    valid_uplifts = [u for u in window_uplifts if not np.isnan(u)]
+    n_pass = sum(1 for u in valid_uplifts if u > 0)
+    pass_ratio = n_pass / len(valid_uplifts) if len(valid_uplifts) > 0 else 0
+
+    trigger_counts = np.array([d["n_signals"] for d in window_details])
+    if len(trigger_counts) > 1 and np.mean(trigger_counts) > 0:
+        trigger_cv = float(np.std(trigger_counts) / np.mean(trigger_counts))
+    else:
+        trigger_cv = 0.0
+
+    return {
+        "window_uplifts": window_uplifts,
+        "n_pass": n_pass,
+        "n_total_windows": len(valid_uplifts),
+        "pass_ratio": pass_ratio,
+        "total_triggers": total_triggers,
+        "trigger_cv": trigger_cv,
+        "window_details": window_details,
+    }
+
+
+def factor_health_analysis(factor: pd.Series, med_w: pd.Series,
+                            forward_weeks: int = 13,
+                            cond_ret_full: float = None,
+                            cond_ret_recent: float = None,
+                            freq_all: float = None,
+                            freq_recent: float = None) -> dict:
+    """Evidence-based 因子健康评估。
+
+    收集多维 evidence，综合给出 Grade + Confidence + Action。
+    扩展时只需在 evidence 列表中添加新维度，Grade 合成逻辑统一处理。
+
+    Evidence 来源:
+        - rolling_window: 4窗口 uplift 通过率 (来自 temporal_stability)
+        - trigger_cv:     触发集中度 (CV > 0.8 = 高集中)
+        - a1_drift:       近3年 vs 全历史条件收益漂移
+        - freq_drift:     近半年 vs 全历史触发频率漂移
+        - uplift_decay:   窗口间 uplift 衰减趋势
+
+    Returns:
+        dict with grade, confidence, action, evidence(dict), reasons(list)
+    """
+    # ── 1. 基础窗口计算 ──
+    stab = temporal_stability(factor, med_w, forward_weeks)
+    total_triggers = stab["total_triggers"]
+    low_freq = total_triggers <= 15
+    trigger_cv = stab["trigger_cv"]
+    n_valid = stab["n_total_windows"]
+    pass_ratio = stab["pass_ratio"]
+    valid_uplifts = [u for u in stab["window_uplifts"] if not np.isnan(u)]
+
+    # ── 2. Evidence 收集 ──
+    evidence = {
+        "rolling_window": {
+            "pass_ratio": pass_ratio,
+            "n_valid": n_valid,
+            "n_pass": stab["n_pass"],
+            "window_uplifts": stab["window_uplifts"],
+        },
+        "trigger_cv": {
+            "value": trigger_cv,
+            "high": trigger_cv > 0.8,
+        },
+        "total_triggers": total_triggers,
+        "low_freq": low_freq,
+    }
+
+    # A1 drift (if provided by caller)
+    if cond_ret_full is not None and cond_ret_recent is not None:
+        drift_pct = (abs(cond_ret_recent - cond_ret_full)
+                     / max(abs(cond_ret_full), 1))
+        evidence["a1_drift"] = {
+            "full": cond_ret_full,
+            "recent": cond_ret_recent,
+            "drift_pct": drift_pct,
+            "flagged": drift_pct > 0.5,
+        }
+
+    # Frequency drift (if provided)
+    if freq_all is not None and freq_recent is not None:
+        if freq_all > 0:
+            freq_dev = abs(freq_recent - freq_all) / max(freq_all, 0.001)
+        else:
+            freq_dev = 0
+        evidence["freq_drift"] = {
+            "all": freq_all,
+            "recent": freq_recent,
+            "deviation": freq_dev,
+            "flagged": freq_dev > 0.5,
+        }
+
+    # Uplift decay
+    decay_ratio = None
+    if len(valid_uplifts) >= 2:
+        half = max(1, len(valid_uplifts) // 2)
+        first_half = np.mean(valid_uplifts[:half])
+        second_half = np.mean(valid_uplifts[half:]) if len(valid_uplifts) > half else valid_uplifts[-1]
+        if first_half > 0:
+            decay_ratio = second_half / first_half
+    evidence["uplift_decay"] = {
+        "ratio": decay_ratio,
+        "flagged": decay_ratio is not None and decay_ratio < 0.4,
+    }
+
+    # ── 3. Grade 合成（从 evidence 推导，非硬编码阈值）──
+    reasons = []
+
+    if n_valid == 0:
+        grade = "Insufficient"
+        reasons.append("无有效窗口可评估")
+
+    elif pass_ratio >= 0.75:
+        grade = "Stable"
+
+        # Regime-dependent: 高CV + 有效窗口少 + 非低频
+        if (not low_freq and trigger_cv > 0.8
+                and n_valid <= 2 and n_valid < 3):
+            grade = "Regime-dependent"
+            reasons.append(f"触发高度集中(CV={trigger_cv:.2f})，仅{n_valid}个窗口有足够触发")
+
+        # Declining: uplift 衰减
+        if grade == "Stable" and evidence["uplift_decay"]["flagged"]:
+            grade = "Declining"
+            reasons.append(f"uplift 跨窗口衰减(比率={decay_ratio:.2f})")
+
+        # A1 drift 交叉验证
+        if grade == "Stable" and evidence.get("a1_drift", {}).get("flagged"):
+            if grade == "Stable":
+                reasons.append("A1 近3年条件收益漂移>50%，交叉验证需关注")
+
+        if not reasons:
+            reasons.append(f"{stab['n_pass']}/{n_valid}窗口uplift正向，分布均匀")
+
+    elif trigger_cv > 0.8 and stab["n_pass"] > 0:
+        grade = "Regime-dependent"
+        reasons.append(f"触发集中在特定市场阶段(CV={trigger_cv:.2f})，触发时uplift正向")
+
+    elif stab["n_pass"] == 0:
+        grade = "Unstable"
+        reasons.append("所有有效窗口uplift均非正向")
+
+    else:
+        if n_valid >= 3:
+            recent = valid_uplifts[-1]
+            early = np.mean(valid_uplifts[:max(1, n_valid // 2)])
+            if early > 1.0 and recent < 0:
+                grade = "Declining"
+                reasons.append("后期窗口uplift转负")
+            else:
+                grade = "Regime-dependent"
+                reasons.append("部分窗口正向但不稳定")
+        else:
+            grade = "Unstable"
+            reasons.append("有效窗口不足且uplift不一致")
+
+    # 低频标注
+    if low_freq:
+        reasons.insert(0, f"低频因子({total_triggers}次触发)，统计效力有限")
+
+    # ── 4. Confidence 评估 ──
+    evidence_count = sum([
+        n_valid >= 3,                          # 足够窗口
+        total_triggers >= 15,                  # 足够触发
+        evidence.get("a1_drift") is not None,  # 有A1数据
+        evidence.get("freq_drift") is not None, # 有频率漂移数据
+    ])
+
+    if grade == "Stable":
+        confidence = "High" if n_valid >= 3 and total_triggers >= 15 else "Medium"
+    elif grade == "Declining":
+        if n_valid >= 3 and decay_ratio is not None and decay_ratio < 0.2:
+            confidence = "High"
+        else:
+            confidence = "Low"
+    elif grade == "Regime-dependent":
+        confidence = "Medium" if total_triggers >= 10 else "Low"
+    elif grade == "Unstable":
+        confidence = "High" if n_valid >= 3 and pass_ratio == 0 else "Medium"
+    else:
+        confidence = "Low"
+
+    if low_freq and confidence != "Low":
+        confidence = "Low"
+
+    # 低频时 Stable 不加置信度降级（数据少但方向一致也是有效信息）
+    if low_freq and grade.startswith("Stable"):
+        confidence = "Medium"
+
+    # ── 5. Action ──
+    base_grade = grade.split("(")[0].strip()  # 去掉 "(低频)" 标注
+    action = HEALTH_ACTIONS.get(base_grade, "待评估")
+
+    return {
+        "grade": grade,
+        "confidence": confidence,
+        "action": action,
+        "evidence": evidence,
+        "reasons": reasons,
+        "total_triggers": total_triggers,
+        "trigger_cv": trigger_cv,
+        "window_uplifts": stab["window_uplifts"],
+        "n_pass": stab["n_pass"],
+        "n_total_windows": n_valid,
+        "pass_ratio": pass_ratio,
+        "low_freq": low_freq,
+        "window_details": stab["window_details"],
+    }
+
+
+def version_recommendation(health_results: dict) -> dict:
+    """模型版本决策 — 从因子监测到版本治理的闭环。
+
+    Args:
+        health_results: {factor_name: factor_health_analysis() result}
+
+    Returns:
+        dict with recommendation, reason, evidence, action
+    """
+    grades = [r["grade"].split("(")[0].strip() for r in health_results.values()]
+    n_total = len(grades)
+    n_stable = grades.count("Stable")
+    n_regime = grades.count("Regime-dependent")
+    n_declining = grades.count("Declining")
+    n_unstable = grades.count("Unstable")
+    n_insufficient = grades.count("Insufficient")
+
+    declining_factors = [
+        name for name, r in health_results.items()
+        if "Declining" in r["grade"]
+    ]
+    unstable_factors = [
+        name for name, r in health_results.items()
+        if "Unstable" in r["grade"]
+    ]
+
+    # 决策逻辑
+    if n_unstable > 0:
+        recommendation = "Recommend V5.3 Review"
+        reason = (f"{n_unstable} 个因子 Unstable "
+                  f"({', '.join(unstable_factors)})")
+        action = "启动 V5.3 评估：审查不稳定因子，考虑替换或淘汰"
+    elif n_declining >= 2:
+        recommendation = "Recommend V5.3 Review"
+        reason = f"{n_declining} 个因子 Declining"
+        action = "启动 V5.3 评估：多个因子同时衰减，需寻找替代因子"
+    elif n_declining == 1:
+        recommendation = "Keep Current — 重点观察"
+        reason = (f"1 个因子 Declining ({declining_factors[0]})，"
+                  f"证据尚不充分，需连续 2 次审计确认")
+        action = f"下次审计重点复查 {declining_factors[0]}，若持续 Declining 则启动 V5.3"
+    else:
+        recommendation = "Keep Current"
+        reason = f"{n_stable} Stable, {n_regime} Regime-dependent，整体健康"
+        action = "维持当前模型配置，按计划季度审计"
+
+    return {
+        "recommendation": recommendation,
+        "reason": reason,
+        "action": action,
+        "summary": {
+            "total": n_total,
+            "stable": n_stable,
+            "regime_dependent": n_regime,
+            "declining": n_declining,
+            "unstable": n_unstable,
+            "insufficient": n_insufficient,
+        },
+    }
 
 
 def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
@@ -330,7 +674,8 @@ def threshold_optimization(pool: pd.DataFrame, scoring: pd.DataFrame,
 def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
                        pe_w: pd.Series = None, margin_w: pd.Series = None,
                        north_w: pd.Series = None, hs300_w: pd.Series = None,
-                       m2_w: pd.Series = None) -> dict:
+                       m2_w: pd.Series = None,
+                       forward_weeks: int = 13) -> dict:
     """执行完整五阶段优化, 返回所有结果"""
     print("=" * 60)
     print("  V5.0 因子自动筛选与赋权框架")
@@ -343,7 +688,7 @@ def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
     print(f"  候选因子: {len(pool.columns)} 个")
 
     # 阶段2
-    print("\n[阶段2] 单因子三漏斗检验...")
+    print("\n[阶段2] 单因子三漏斗检验 (稀疏度→收益→CI)...")
     screened = screen_factors(pool, med_w)
     print(f"  通过筛选: {len(screened)}/{len(pool.columns)}")
     if len(screened) == 0:
@@ -351,6 +696,20 @@ def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
         return {}
     for _, r in screened.iterrows():
         print(f"    {r['factor']:20s} | freq={r['freq']:.1%} | E={r['e_cond']:+.1f}% | Uplift={r['uplift']:+.1f}% | CI=[{r['uplift_ci_low']:+.1f}%,{r['uplift_ci_high']:+.1f}%]")
+
+    # 健康监测层: evidence-based 因子健康评估
+    print("\n[监测层] Evidence-based 因子健康评估...")
+    health_results = {}
+    for _, r in screened.iterrows():
+        f = r["factor"]
+        health = factor_health_analysis(pool[f], med_w, forward_weeks)
+        health_results[f] = health
+        conf_tag = f" [{health['confidence']}]" if health['confidence'] != "High" else ""
+        print(f"    {f:20s} | Grade={health['grade']:20s} | Conf={health['confidence']:6s} | Action={health['action']}")
+
+    # 版本决策
+    ver_rec = version_recommendation(health_results)
+    print(f"\n[版本决策] {ver_rec['recommendation']}: {ver_rec['reason']}")
 
     # 阶段3
     print("\n[阶段3] 条件概率去重...")
@@ -380,4 +739,6 @@ def run_full_pipeline(med_w: pd.Series, vol_w: pd.Series = None,
         "final_factors": final,
         "scoring": scoring,
         "threshold_analysis": threshold_df,
+        "health_results": health_results,
+        "version_recommendation": ver_rec,
     }

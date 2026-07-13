@@ -13,11 +13,16 @@
     A3b. 模型回算: 用当前模型对全历史做 retrospective replay
     A4. 因子间相关性 / 多重共线性检查
     A5. 组合表现表: 按 signal_tier 分组的条件收益
+    A6. 因子组合统计: 按具体因子组合(2/3/4因子)枚举统计条件收益
 
   Part B — 新因子发现
-    1. 运行五阶段因子优化全流程
+    1. 运行五阶段因子优化全流程（三漏斗筛选）
     2. 对比当前模型配置, 标注新通过 / 不再通过的因子
     3. 给出候选评分卡建议
+
+  健康监测层 — 时间稳定性评估 (Stability Grade)
+    对活跃因子评估跨窗口 uplift 稳定性
+    输出 Grade (Stable/Regime-dependent/Declining/Unstable)，不淘汰因子
 
 输出: data/processed/audit_report.md + system_log
 """
@@ -194,15 +199,24 @@ def _signal_quality_live(med_w):
             price_fwd = med_w.iloc[fwd_idx + 13]
             fwd_ret = (price_fwd / price_now - 1) * 100
 
+        # 清理 SQLite 中可能的旧格式值 (带引号或 None 字符串)
+        tier_raw = r.get("signal_tier") or ""
+        tier_raw = str(tier_raw).strip("'\"")
+        tier = "" if tier_raw in ("None", "none", "") else tier_raw
+
+        ver_raw = r.get("model_version") or ""
+        ver_raw = str(ver_raw).strip("'\"")
+        ver = "" if ver_raw in ("None", "none", "") else ver_raw
+
         records.append({
             "日期": date_str,
             "Score": round(float(r["score"] or 0), 1),
             "价格": round(float(r["price"] or 0), 0),
-            "Tier": r.get("signal_tier") or "",
+            "Tier": tier,
             "13周后收益": round(fwd_ret, 1) if not np.isnan(fwd_ret) else None,
             "结果": "盈利" if not np.isnan(fwd_ret) and fwd_ret > 0
                     else ("亏损" if not np.isnan(fwd_ret) else "待验证"),
-            "model_version": r.get("model_version") or "",
+            "model_version": ver,
         })
 
     return pd.DataFrame(records)
@@ -353,6 +367,8 @@ def _run_factor_discovery(med_w, margin_w, vol_w=None,
         "new_factors": new_factors,
         "dropped_factors": dropped,
         "threshold_analysis": threshold_df,
+        "health_results": results.get("health_results", {}),
+        "version_recommendation": results.get("version_recommendation", {}),
     }
 
 
@@ -413,6 +429,85 @@ def _combination_performance(med_w, margin_w, vol_w=None,
     })
 
     return pd.DataFrame(rows)
+
+
+def _combo_factor_statistics(med_w, margin_w, vol_w=None,
+                              north_w=None, hs300_w=None, m2_w=None):
+    """A6: 按具体因子组合统计表现
+
+    枚举当前活跃因子的所有非空组合（2因子、3因子、4因子），
+    分别统计每种组合的触发次数、条件收益、CI、胜率。
+    让 tier 分级从经验判断走向数据驱动。
+    """
+    from src.models.factor_optimizer import build_factor_pool, bootstrap_ci
+
+    config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
+    active_factors = list(config["factors"].keys())
+
+    pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                             north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
+
+    # 只取当前活跃因子
+    active_pool = pool[[f for f in active_factors if f in pool.columns]]
+    if len(active_pool.columns) < 2:
+        return pd.DataFrame()
+
+    fwd_ret = med_w.pct_change(13).shift(-13) * 100
+
+    # 枚举所有组合（2因子以上）
+    from itertools import combinations as iter_combinations
+
+    rows = []
+    for k in range(2, len(active_pool.columns) + 1):
+        for combo in iter_combinations(active_pool.columns, k):
+            # 该组合触发的周
+            mask = pd.Series(True, index=active_pool.index)
+            for f in combo:
+                mask = mask & (active_pool[f] == 1)
+
+            triggered_idx = active_pool.index[mask]
+            n = len(triggered_idx)
+            if n == 0:
+                continue
+
+            # 前瞻收益
+            rets = fwd_ret.reindex(triggered_idx).dropna()
+            n_verified = len(rets)
+            if n_verified == 0:
+                rows.append({
+                    "组合": "+".join(f[:2] for f in combo),
+                    "因子数": k,
+                    "触发数": n,
+                    "已验证": 0,
+                    "平均收益": "待验证",
+                    "胜率": "N/A",
+                    "CI_low": "N/A",
+                    "CI_high": "N/A",
+                })
+                continue
+
+            mean_ret = rets.mean()
+            win_rate = (rets > 0).mean()
+            ci_low, ci_high = bootstrap_ci(rets.values, n_iter=1000)
+
+            rows.append({
+                "组合": "+".join(f[:2] for f in combo),
+                "因子数": k,
+                "触发数": n,
+                "已验证": n_verified,
+                "平均收益": f"{mean_ret:.1f}%",
+                "胜率": f"{win_rate*100:.0f}%",
+                "CI_low": f"{ci_low:+.1f}%" if not np.isnan(ci_low) else "N/A",
+                "CI_high": f"{ci_high:+.1f}%" if not np.isnan(ci_high) else "N/A",
+            })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    # 按因子数排序（先少后多），同因子数按触发数降序
+    df = df.sort_values(["因子数", "触发数"], ascending=[True, False])
+    return df
 
 
 # ═══════════════════════════════════════════
@@ -547,6 +642,114 @@ def generate_report(med_w, margin_w, vol_w=None,
             lines.append("无 armed 信号，组合表现表为空。\n")
     except Exception as e:
         lines.append(f"### A5. 组合表现\n\n**执行失败**: {e}\n")
+
+    # A6: 因子组合统计
+    print("  [A6] 因子组合统计...")
+    try:
+        combo_factor_df = _combo_factor_statistics(med_w, margin_w, vol_w,
+                                                     north_w, hs300_w, m2_w)
+        lines.append("### A6. 因子组合统计 (按具体因子组合, 去重触发级)\n")
+        lines.append("枚举当前活跃因子的所有组合（2因子/3因子/4因子），统计各组合的条件收益。\n")
+        if len(combo_factor_df) > 0:
+            lines.append(_df_to_md(combo_factor_df))
+        else:
+            lines.append("无多因子同时触发的记录。\n")
+    except Exception as e:
+        lines.append(f"### A6. 因子组合统计\n\n**执行失败**: {e}\n")
+
+    # Stability Monitoring: Evidence-based 因子健康评估
+    lines.append(f"---\n")
+    lines.append(f"## 健康监测层: Evidence-based 因子评估\n")
+    lines.append("收集多维 Evidence（滚动窗口/触发集中度/A1漂移/频率漂移/uplift衰减），综合评估因子健康状态。\n")
+    lines.append("Grade: Stable/Regime-dependent/Declining/Unstable | Confidence: High/Medium/Low\n")
+
+    print("  [监测层] Evidence-based 因子健康评估...")
+    health_results = {}
+    try:
+        from src.models.factor_optimizer import (build_factor_pool, factor_health_analysis,
+                                                   version_recommendation, HEALTH_ACTIONS)
+
+        pool = build_factor_pool(med_w, vol_w=vol_w, margin_w=margin_w,
+                                 north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
+        fwd_ret = med_w.pct_change(13).shift(-13) * 100
+        cutoff = med_w.index[-1] - pd.DateOffset(years=3)
+        cutoff_6m = pool.index[-1] - pd.DateOffset(weeks=26)
+
+        stab_rows = []
+        for factor in factor_names:
+            if factor not in pool.columns:
+                stab_rows.append({"因子": factor, "Grade": "无数据", "Confidence": "N/A",
+                                  "Action": "N/A", "Evidence": "N/A"})
+                continue
+
+            # 收集额外 evidence 数据
+            n_full = int(pool[factor].sum())
+            cond_full = fwd_ret[pool[factor] == 1].mean() if n_full > 0 else None
+            mask_recent = med_w.index >= cutoff
+            pool_recent = pool.loc[mask_recent]
+            fwd_recent = fwd_ret.loc[mask_recent]
+            n_recent = int(pool_recent[factor].sum())
+            cond_recent = fwd_recent[pool_recent[factor] == 1].mean() if n_recent > 0 else None
+
+            freq_all = pool[factor].mean()
+            freq_recent = pool.loc[pool.index >= cutoff_6m, factor].mean()
+
+            health = factor_health_analysis(
+                pool[factor], med_w,
+                cond_ret_full=cond_full if not (cond_full is None or np.isnan(cond_full)) else None,
+                cond_ret_recent=cond_recent if not (cond_recent is None or np.isnan(cond_recent)) else None,
+                freq_all=freq_all,
+                freq_recent=freq_recent,
+            )
+            health_results[factor] = health
+
+            # Evidence 摘要
+            ev_parts = [f"窗口pass={health['n_pass']}/{health['n_total_windows']}"]
+            if health["trigger_cv"] > 0.5:
+                ev_parts.append(f"CV={health['trigger_cv']:.2f}")
+            if "a1_drift" in health["evidence"]:
+                d = health["evidence"]["a1_drift"]
+                ev_parts.append(f"A1漂移={d['drift_pct']:.0%}")
+            if "uplift_decay" in health["evidence"] and health["evidence"]["uplift_decay"]["flagged"]:
+                ev_parts.append(f"衰减比={health['evidence']['uplift_decay']['ratio']:.2f}")
+
+            stab_rows.append({
+                "因子": factor,
+                "Grade": health["grade"],
+                "Confidence": health["confidence"],
+                "Action": health["action"],
+                "Evidence": ", ".join(ev_parts),
+                "窗口uplifts": ", ".join(
+                    f"{u:+.1f}%" if not np.isnan(u) else "N/A"
+                    for u in health["window_uplifts"]
+                ),
+            })
+
+        stab_df = pd.DataFrame(stab_rows)
+        lines.append(_df_to_md(stab_df))
+
+        # Reason 详情
+        for factor, health in health_results.items():
+            if health["reasons"]:
+                lines.append(f"- **{factor}**: {'; '.join(health['reasons'])}")
+        lines.append("")
+
+        # ── Version Recommendation ──
+        ver_rec = version_recommendation(health_results)
+        lines.append(f"### 版本决策\n")
+        s = ver_rec["summary"]
+        lines.append(f"**{ver_rec['recommendation']}**\n")
+        lines.append(f"因子健康: {s['stable']} Stable, {s['regime_dependent']} Regime-dependent, "
+                     f"{s['declining']} Declining, {s['unstable']} Unstable\n")
+        lines.append(f"原因: {ver_rec['reason']}\n")
+        lines.append(f"建议: {ver_rec['action']}\n")
+
+        # 准入机制说明
+        lines.append("\n> 版本升级准入: 连续 2 次审计出现同一因子 Declining，或任一次审计出现 Unstable，"
+                     "方启动 V5.3 评估。单次 Declining 仅标记为重点观察。\n")
+
+    except Exception as e:
+        lines.append(f"**健康监测层执行失败**: {e}\n")
 
     # Part B: 新因子发现
     lines.append(f"---\n")

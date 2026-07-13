@@ -36,7 +36,7 @@ src/
   models/rule_registry.py     统一规则引擎：RULE_DEFS + MODEL_CONFIGS + evaluate_signal
   models/indicators.py        共享技术指标（rsi_wilder, macd_histogram 单一来源）
   models/turning_points.py    distance_to_trigger + alert_level + Triple Barrier
-  models/factor_optimizer.py  五阶段因子筛选框架
+  models/factor_optimizer.py  三漏斗筛选 + Evidence-based 健康监测 + 版本决策
   data_fetcher/akshare_source.py  AKShare 数据源(index_min_sw 实时 + ETF代理兜底)
   data_fetcher/fred_source.py     FRED 美国宏观数据
 
@@ -65,8 +65,10 @@ schtasks /create /tn "月度因子审计" /tr "<项目路径>\run_audit.bat" /sc
 
 ## 月度审计说明
 
-`monthly_audit.py` 分两部分：
+`monthly_audit.py` 分两部分加一个监测层：
 
-Part A 检验当前四因子(L1/M1/S3/V1)的稳健性。滚动窗口稳定性对比近 3 年和全历史的条件收益，偏差超过 50% 标记为"漂移"。触发频率漂移检查近半年 vs 全历史的触发率。信号复盘分两部分：A3a 从 SQLite 取真实 live 信号复盘，A3b 用当前模型对全历史做 retrospective replay。A5 按 signal_tier 分组统计组合表现（胜率、平均/中位收益）。
+Part A 检验当前四因子(L1/M1/S3/V1)的稳健性。滚动窗口稳定性对比近 3 年和全历史的条件收益，偏差超过 50% 标记为"漂移"。触发频率漂移检查近半年 vs 全历史的触发率。信号复盘分两部分：A3a 从 SQLite 取真实 live 信号复盘，A3b 用当前模型对全历史做 retrospective replay。A5 按 signal_tier 分组统计组合表现（胜率、平均/中位收益）。A6 枚举活跃因子的所有组合（2/3/4因子），统计各组合条件收益。
 
-Part B 运行完整的五阶段因子优化流水线，与当前 MODEL_CONFIGS 配置对比。如果有新因子通过筛选或旧因子不再通过，会在报告末尾建议更新 `rule_registry.py` 中的模型配置。报告只生成不自动执行——是否采纳由你决定。
+健康监测层收集多维 Evidence（滚动窗口/触发集中度/A1漂移/频率漂移/uplift衰减），综合评估因子健康状态，输出 Grade（Stable/Regime-dependent/Declining/Unstable）+ Confidence（High/Medium/Low）+ Action（保持/观察/复查/淘汰候选）。最后输出 Version Recommendation（Keep Current / Recommend V5.3 Review），形成从因子监测到版本治理的闭环。当前 S3 最稳定（Stable/High），M1 为 Regime-dependent（暴跌期集中触发是设计意图），V1 为 Declining（衰减比0.13，High Confidence，需下次审计确认），L1 为 Stable 低频。版本升级准入：连续2次审计同一因子 Declining 或任一次 Unstable 方启动 V5.3。
+
+Part B 运行完整的五阶段因子优化流水线（三漏斗筛选），与当前 MODEL_CONFIGS 配置对比。如果有新因子通过筛选或旧因子不再通过，会在报告末尾建议更新 `rule_registry.py` 中的模型配置。Part B 同时筛选 3 个外部因子候选（S4 北向背离、E1 大盘熊市、E2 M2 加速），但这些均未通过历史检验——与现有因子高度共触发或样本不足。跨市场因子（XBI/IBB）和产业链因子（化工/食品/房地产）也已测试排除。报告只生成不自动执行——是否采纳由你决定。
