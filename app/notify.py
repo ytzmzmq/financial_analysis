@@ -127,11 +127,24 @@ def run(dry_run: bool = False, test_push: bool = False):
     now = datetime.now()
     weekday_cn = "一二三四五六日"[now.weekday()]
     print(f"[{now.strftime('%Y-%m-%d')} 周{weekday_cn} {now.strftime('%H:%M:%S')}] 运行监控...")
+
+    from app.db import log_error
+
+    # 分步执行：数据拉取 → 信号计算，分别记录错误
     try:
-        sig = _compute(_load_data())
+        data = _load_data()
     except Exception as e:
-        print(f"  数据拉取失败: {e}")
-        print(f"  [SILENT] 无法计算信号, 静默退出")
+        err_msg = f"数据拉取失败: {e}"
+        print(f"  [ERROR] {err_msg}")
+        log_error("data_fetch", err_msg, "error")
+        return
+
+    try:
+        sig = _compute(data)
+    except Exception as e:
+        err_msg = f"信号计算失败: {e}"
+        print(f"  [ERROR] {err_msg}")
+        log_error("compute", err_msg, "error")
         return
     alert = sig["alert"]
     score = sig["score"]

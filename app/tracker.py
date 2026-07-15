@@ -26,13 +26,25 @@ def _load_data() -> dict:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from src.data_fetcher.akshare_source import AKShareSource
     ak_src = AKShareSource()
+
+    # sw_medical 是核心数据源，失败直接抛异常
     med_df = ak_src.fetch_sw_medical("20180101")
-    margin_df = ak_src.fetch_margin_data("20180101")
-    north_df = ak_src.fetch_north_flow("20180101")
-    hs300_df = ak_src.fetch_market_index("hs300", "20180101")
-    m2_df = ak_src.fetch_m2("20180101")
-    return {"sw_medical": med_df, "total_margin": margin_df,
-            "north_flow": north_df, "hs300": hs300_df, "m2": m2_df}
+
+    # 辅助数据源：单个失败不影响整体
+    optional_sources = {
+        "total_margin": lambda: ak_src.fetch_margin_data("20180101"),
+        "north_flow":   lambda: ak_src.fetch_north_flow("20180101"),
+        "hs300":        lambda: ak_src.fetch_market_index("hs300", "20180101"),
+        "m2":           lambda: ak_src.fetch_m2("20180101"),
+    }
+    result = {"sw_medical": med_df}
+    for name, fetcher in optional_sources.items():
+        try:
+            result[name] = fetcher()
+        except Exception as e:
+            print(f"  [WARN] {name} 拉取失败(非致命): {e}")
+            result[name] = pd.DataFrame()
+    return result
 
 
 def _compute(data: dict, custom_price: float = None) -> dict:
