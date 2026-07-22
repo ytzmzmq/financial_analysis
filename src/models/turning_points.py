@@ -644,3 +644,193 @@ def alert_level(df: pd.DataFrame, prev_score: float | None = None,
         else:
             return {"level": "silent",
                     "message": "常态区间。"}
+
+
+# ═══════════════════════════════════════════
+# 11. Composite Bottom Probability (0-100)
+# ═══════════════════════════════════════════
+
+def composite_bottom_probability(med_w: pd.Series, margin_w: pd.Series = None,
+                                  config: dict = None) -> dict:
+    """连续概率层：把各因子的连续指标映射到 0-100，加权合成。
+
+    不改变底层二值化模型，仅提供一个平滑的"离底部有多近"指标。
+    各因子子分数映射逻辑：
+        L1: RSI 50→0, 30→50, 20→75, 10→100
+        M1: skew 0→0, -1→30, -1.5→50, -2.5→100
+        S3: 接近13周低点程度 × 融资是否逆势加仓
+        V1: 5年分位 50→0, 15→50, 5→80, 0→100
+    """
+    from src.models.indicators import rsi_wilder
+
+    n = len(med_w)
+    if n < 52:
+        return {"score": 0.0, "components": {}}
+
+    rsi_val = float(rsi_wilder(med_w, 14).iloc[-1])
+    skew_val = float(med_w.pct_change().rolling(13).skew().iloc[-1])
+    val_pct = float(med_w.rolling(260, min_periods=52).rank(pct=True).iloc[-1] * 100)
+
+    # L1: RSI 越低分越高 (piecewise linear)
+    if rsi_val <= 20:
+        l1_score = 75 + (20 - rsi_val) / 10 * 25
+    elif rsi_val <= 30:
+        l1_score = 50 + (30 - rsi_val) / 10 * 25
+    elif rsi_val <= 50:
+        l1_score = max(0, (50 - rsi_val) / 20 * 50)
+    else:
+        l1_score = 0
+    l1_score = min(100, max(0, l1_score))
+
+    # M1: 偏度越负分越高
+    if skew_val <= -2.5:
+        m1_score = 100
+    elif skew_val <= -1.5:
+        m1_score = 50 + (-1.5 - skew_val) / 1.0 * 50
+    elif skew_val <= 0:
+        m1_score = max(0, -skew_val / 1.5 * 50)
+    else:
+        m1_score = 0
+    m1_score = min(100, max(0, m1_score))
+
+    # S3: 接近13周低点程度 + 融资动向
+    ll_13 = float(med_w.rolling(13).min().iloc[-1])
+    hh_13 = float(med_w.rolling(13).max().iloc[-1])
+    curr = float(med_w.iloc[-1])
+    if hh_13 > ll_13:
+        proximity = 1 - (curr - ll_13) / (hh_13 - ll_13)
+    else:
+        proximity = 0.5
+    s3_proximity = max(0, min(100, proximity * 100))
+
+    s3_margin_boost = 1.0
+    if margin_w is not None and len(margin_w.dropna()) >= 5:
+        margin_aligned = margin_w.reindex(med_w.index).ffill()
+        margin_chg = float(margin_aligned.iloc[-1] / margin_aligned.iloc[-5] - 1)
+        if margin_chg > 0:
+            s3_margin_boost = 1.3
+        elif margin_chg < -0.02:
+            s3_margin_boost = 0.7
+    s3_score = min(100, max(0, s3_proximity * s3_margin_boost))
+
+    # V1: 5年分位越低分越高
+    if val_pct <= 5:
+        v1_score = 80 + (5 - val_pct) / 5 * 20
+    elif val_pct <= 15:
+        v1_score = 50 + (15 - val_pct) / 10 * 30
+    elif val_pct <= 50:
+        v1_score = max(0, (50 - val_pct) / 35 * 50)
+    else:
+        v1_score = 0
+    v1_score = min(100, max(0, v1_score))
+
+    # 按 V5.2 权重比例合成
+    weights = {"L1": 3.0, "M1": 2.5, "S3": 2.0, "V1": 2.0}
+    w_total = sum(weights.values())
+    composite = (l1_score * weights["L1"] + m1_score * weights["M1"]
+                 + s3_score * weights["S3"] + v1_score * weights["V1"]) / w_total
+
+    return {
+        "score": round(min(100, max(0, composite)), 1),
+        "components": {
+            "L1_rsi": round(l1_score, 1),
+            "M1_skew": round(m1_score, 1),
+            "S3_smart": round(s3_score, 1),
+            "V1_value": round(v1_score, 1),
+        },
+        "raw": {
+            "rsi": round(rsi_val, 1),
+            "skew": round(skew_val, 2),
+            "val_pct": round(val_pct, 1),
+            "proximity_13w": round(proximity * 100, 1),
+        },
+    }
+
+
+# ═══════════════════════════════════════════
+# 12. Regime 标注
+# ═══════════════════════════════════════════
+
+def regime_label(med_w: pd.Series, hs300_w: pd.Series = None) -> dict:
+    """市场环境标注: 牛/震荡/熊。
+
+    判定逻辑:
+        - 医药指数 > 52周MA 且 HS300 > 200周MA → 牛市
+        - 医药指数 < 52周MA 且跌幅>15%       → 熊市
+        - 其他                                    → 震荡
+    """
+    n = len(med_w)
+    if n < 52:
+        return {"label": "数据不足", "emoji": "⚪", "detail": ""}
+
+    ma52 = float(med_w.rolling(52).mean().iloc[-1])
+    curr = float(med_w.iloc[-1])
+    pct_from_ma = (curr / ma52 - 1) * 100
+
+    # HS300 辅助判定
+    hs300_bear = False
+    if hs300_w is not None and len(hs300_w.dropna()) >= 200:
+        hs300_aligned = hs300_w.reindex(med_w.index).ffill()
+        hs300_ma200 = float(hs300_aligned.rolling(200, min_periods=100).mean().iloc[-1])
+        hs300_curr = float(hs300_aligned.iloc[-1])
+        hs300_bear = hs300_curr < hs300_ma200
+
+    if pct_from_ma > 5 and not hs300_bear:
+        return {"label": "偏牛", "emoji": "🟢",
+                "detail": f"指数高于52周MA {pct_from_ma:+.1f}%"}
+    elif pct_from_ma < -15 or (pct_from_ma < 0 and hs300_bear):
+        return {"label": "偏熊", "emoji": "🔴",
+                "detail": f"指数低于52周MA {pct_from_ma:+.1f}%，大盘{'也' if hs300_bear else '未'}入熊"}
+    else:
+        return {"label": "震荡", "emoji": "🟡",
+                "detail": f"指数距52周MA {pct_from_ma:+.1f}%"}
+
+
+# ═══════════════════════════════════════════
+# 13. 历史 Armed 信号前瞻收益
+# ═══════════════════════════════════════════
+
+def historical_armed_performance(df: pd.DataFrame, med_w: pd.Series,
+                                  forward_weeks: int = 13,
+                                  lookback_years: int = 3) -> dict:
+    """统计过去 N 年内 Armed 信号的 13 周前瞻收益。
+
+    返回: mean_return, win_rate, n_signals, best, worst
+    """
+    n = len(med_w)
+    cutoff_idx = max(0, n - lookback_years * 52)
+    armed_mask = df["armed"] == 1
+    armed_idx = df.index[armed_mask]
+
+    # 只看 cutoff 之后的 armed 信号
+    armed_idx = armed_idx[armed_idx >= df.index[cutoff_idx]]
+
+    # 去重叠 (4 周内合并为一次)
+    deoverlapped = []
+    last = None
+    for d in armed_idx:
+        if last is None or (d - last).days > 28:
+            deoverlapped.append(d)
+            last = d
+
+    returns = []
+    for d in deoverlapped:
+        pos = med_w.index.searchsorted(d)
+        end = min(pos + forward_weeks, n - 1)
+        if end > pos:
+            ret = (med_w.iloc[end] / med_w.iloc[pos] - 1) * 100
+            returns.append(float(ret))
+
+    if len(returns) == 0:
+        return {"mean": None, "median": None, "win_rate": None,
+                "n_signals": 0, "best": None, "worst": None}
+
+    returns = np.array(returns)
+    return {
+        "mean": round(float(returns.mean()), 1),
+        "median": round(float(np.median(returns)), 1),
+        "win_rate": round(float((returns > 0).mean()), 2),
+        "n_signals": len(returns),
+        "best": round(float(returns.max()), 1),
+        "worst": round(float(returns.min()), 1),
+    }

@@ -57,7 +57,11 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         evaluate_signal, evaluate_signal_history,
         MODEL_CONFIGS, ACTIVE_MODEL_VERSION
     )
-    from src.models.turning_points import distance_to_trigger, alert_level
+    from src.models.turning_points import (
+        distance_to_trigger, alert_level,
+        composite_bottom_probability, regime_label,
+        historical_armed_performance,
+    )
 
     med = data["sw_medical"].set_index("date")["close"].sort_index()
     med_w = med.resample("W-FRI").last().dropna()
@@ -130,6 +134,11 @@ def _compute(data: dict, custom_price: float = None) -> dict:
             l1_triggered=result.l1_triggered,
         )
 
+    # ── 增强层: 概率 / 环境 / 历史表现 ──
+    bottom_prob = composite_bottom_probability(med_w, margin_w=margin_w, config=config)
+    regime = regime_label(med_w, hs300_w=hs300_w)
+    hist_perf = historical_armed_performance(df, med_w)
+
     return {
         "date": result.date,
         "price": result.price,
@@ -151,6 +160,9 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         "alert": alert,
         "df": df,
         "model_version": result.model_version,
+        "bottom_prob": bottom_prob,
+        "regime": regime,
+        "hist_perf": hist_perf,
     }
 
 
@@ -241,6 +253,24 @@ def run_cli():
 
     # Alert
     print(f"\n  警报: [{sig['alert']['level'].upper()}] {sig['alert']['message']}")
+
+    # ── 增强输出 ──
+    bp = sig.get("bottom_prob", {})
+    if bp and bp.get("components"):
+        print(f"\n  底部概率: {bp['score']:.0f}/100")
+        for k, v in bp["components"].items():
+            tag = k.split("_")[0]
+            print(f"    {tag}: {v:.0f}")
+
+    rg = sig.get("regime", {})
+    if rg and rg.get("label"):
+        print(f"\n  市场环境: {rg.get('emoji', '')} {rg['label']}  ({rg.get('detail', '')})")
+
+    hp = sig.get("hist_perf", {})
+    if hp and hp.get("n_signals", 0) > 0:
+        print(f"\n  历史Armed信号 ({hp['n_signals']}次, 近3年):")
+        print(f"    13周后: 均值{hp['mean']:+.1f}%  中位{hp['median']:+.1f}%  "
+              f"胜率{hp['win_rate']:.0%}  [{hp['worst']:+.1f}%~{hp['best']:+.1f}%]")
 
     df = sig["df"]
     recent = df[(df.index >= "2024-01-01") & (df["armed"] == 1)]

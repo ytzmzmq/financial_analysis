@@ -153,21 +153,40 @@ def run(dry_run: bool = False, test_push: bool = False):
     max_score = sig.get("max_score", 5)
     model_ver = sig.get("model_version", "")
 
-    # 构建推送内容 (V5.2 格式)
+    # 构建推送内容 (V5.2 增强格式)
     lines = [
         f"日期: {sig['date']}",
         f"指数: {sig['price']:.0f}",
         f"Score: {score}/{max_score}  ({n_factors}个因子触发)",
         f"分级: {tier}  模型: {model_ver}",
         f"警报: [{alert['level'].upper()}] {alert['message']}",
-        "",
-        "--- 距离触发 ---",
     ]
+
+    # 底部概率
+    bp = sig.get("bottom_prob", {})
+    if bp and bp.get("components"):
+        lines.insert(3, f"底部概率: {bp['score']:.0f}/100")
+
+    # 市场环境
+    rg = sig.get("regime", {})
+    if rg and rg.get("label"):
+        lines.insert(4, f"环境: {rg.get('emoji', '')} {rg['label']}")
+
+    lines.append("")
+    lines.append("--- 距离触发 ---")
     for key, d in sig["distance_to_trigger"].items():
         if d["triggered"]:
             lines.append(f"{d['name']}: 已触发")
         elif d.get("trigger_price") is not None:
             lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f} (距当前 {d['pct_away']:+.1f}%)")
+
+    # 历史 Armed 信号表现
+    hp = sig.get("hist_perf", {})
+    if hp and hp.get("n_signals", 0) > 0:
+        lines.append("")
+        lines.append(f"--- 历史信号 ({hp['n_signals']}次, 近3年) ---")
+        lines.append(f"13周后: 均值{hp['mean']:+.1f}% 胜率{hp['win_rate']:.0%}")
+
     content = "\n".join(lines)
 
     # 根据警报级别决定是否推送
