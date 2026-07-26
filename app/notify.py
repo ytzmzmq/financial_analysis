@@ -16,6 +16,7 @@
 import sys
 import os
 import json
+import math
 import urllib.request
 from pathlib import Path
 from datetime import datetime
@@ -177,8 +178,12 @@ def run(dry_run: bool = False, test_push: bool = False):
     for key, d in sig["distance_to_trigger"].items():
         if d["triggered"]:
             lines.append(f"{d['name']}: 已触发")
-        elif d.get("trigger_price") is not None:
-            lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f} (距当前 {d['pct_away']:+.1f}%)")
+        elif d.get("trigger_price") is not None and not math.isnan(d["trigger_price"]):
+            pct = d.get("pct_away", float("nan"))
+            if pct is not None and not math.isnan(pct):
+                lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f} (距当前 {pct:+.1f}%)")
+            else:
+                lines.append(f"{d['name']}: 触发价 {d['trigger_price']:.0f}")
 
     # 历史 Armed 信号表现
     hp = sig.get("hist_perf", {})

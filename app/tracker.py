@@ -94,6 +94,9 @@ def _compute(data: dict, custom_price: float = None) -> dict:
 
     config = MODEL_CONFIGS[ACTIVE_MODEL_VERSION]
 
+    # 实际数据日期 (W-FRI resample 的 bin label 可能是未来周五)
+    actual_last_date = str(med.index[-1].date())
+
     # ── 核心判定：调用 evaluate_signal() ──
     result = evaluate_signal(ACTIVE_MODEL_VERSION, med_w, margin_w=margin_w,
                              north_w=north_w, hs300_w=hs300_w, m2_w=m2_w)
@@ -106,8 +109,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     dist = distance_to_trigger(df, med_w, margin_w=margin_w, config=config)
 
     # 获取上一次 score（用于 alert_level 计算，排除当天数据）
-    today_str = str(med_w.index[-1].date())
-    prev_score = get_latest_score(before_date=today_str)
+    prev_score = get_latest_score(before_date=actual_last_date)
 
     # Alert level（传入 config，V5.2 按 tier 判定）
     alert = alert_level(df, prev_score, config=config)
@@ -115,7 +117,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     # 持久化到 SQLite（试算模式不写入）
     if custom_price is None:
         save_signal(
-            date=today_str,
+            date=actual_last_date,
             score=result.score,
             armed=result.is_armed,
             alert_level=alert["level"],
@@ -140,7 +142,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
     hist_perf = historical_armed_performance(df, med_w)
 
     return {
-        "date": result.date,
+        "date": actual_last_date,
         "price": result.price,
         "rsi": result.rsi,
         "drawdown_13w": result.drawdown_13w,
@@ -241,15 +243,18 @@ def run_cli():
     # Distance to trigger (只显示有明确触发价格的因子: S3, V1)
     print(f"\n  距离触发:")
     dist = sig["distance_to_trigger"]
-    for key in ["S3", "V1"]:
+    for key in ["S3", "V1", "L1", "M1"]:
         if key not in dist:
             continue
         d = dist[key]
         if d["triggered"]:
             print(f"    {d['name']}: 已触发")
-        elif d.get("trigger_price") is not None:
-            gap = d["trigger_price"] - d["current"]
-            print(f"    {d['name']}: 未触发. 触发价={d['trigger_price']:.0f} (需跌至{d['trigger_price']:.0f}, 再跌{abs(d['pct_away']):.1f}%)")
+        elif d.get("trigger_price") is not None and not np.isnan(d["trigger_price"]):
+            pct = d.get("pct_away", float("nan"))
+            if pct is not None and not np.isnan(pct):
+                print(f"    {d['name']}: 未触发. 触发价={d['trigger_price']:.0f} (距当前 {pct:+.1f}%)")
+            else:
+                print(f"    {d['name']}: 未触发. 触发价={d['trigger_price']:.0f}")
 
     # Alert
     print(f"\n  警报: [{sig['alert']['level'].upper()}] {sig['alert']['message']}")

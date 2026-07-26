@@ -547,7 +547,8 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series,
         if margin_ok:
             trigger_s3 = med_w.iloc[-13:-1].min()
     triggered_s3 = bool(latest.get('rule_S3', 0))
-    pct_away_s3 = (trigger_s3 / curr_price - 1) * 100 if not triggered_s3 and not np.isnan(trigger_s3) else 0.0
+    pct_away_s3 = ((trigger_s3 / curr_price - 1) * 100
+                   if not triggered_s3 and not np.isnan(trigger_s3) else np.nan)
     result["S3"] = {
         "name": "新低背离(S3)", "triggered": triggered_s3,
         "current": curr_price, "trigger_price": trigger_s3, "pct_away": pct_away_s3,
@@ -559,7 +560,8 @@ def distance_to_trigger(df: pd.DataFrame, med_w: pd.Series,
     else:
         trigger_v1 = np.nan
     triggered_v1 = bool(latest.get('rule_V1', 0))
-    pct_away_v1 = (trigger_v1 / curr_price - 1) * 100 if not triggered_v1 and not np.isnan(trigger_v1) else 0.0
+    pct_away_v1 = ((trigger_v1 / curr_price - 1) * 100
+                   if not triggered_v1 and not np.isnan(trigger_v1) else np.nan)
     result["V1"] = {
         "name": "估值冰点(V1)", "triggered": triggered_v1,
         "current": curr_price, "trigger_price": trigger_v1, "pct_away": pct_away_v1,
@@ -618,8 +620,10 @@ def alert_level(df: pd.DataFrame, prev_score: float | None = None,
         dist = distance_to_trigger(df, df['price'], config=config)
         min_away = 999
         for key, dt in dist.items():
-            if not dt["triggered"] and abs(dt.get("pct_away", 999)) < min_away:
-                min_away = abs(dt["pct_away"])
+            pct = dt.get("pct_away")
+            if not dt["triggered"] and pct is not None and not np.isnan(pct):
+                if abs(pct) < min_away:
+                    min_away = abs(pct)
         if min_away <= 2.5:
             return {"level": "yellow",
                     "message": f"临界预警！距极值线仅 {min_away:.1f}%，备好资金。"}
@@ -635,8 +639,12 @@ def alert_level(df: pd.DataFrame, prev_score: float | None = None,
         return {"level": "red",
                 "message": f"Armed (Score {curr_score})，按计划分批买入。"}
     else:
-        s3_away = abs(dist['S3']['pct_away']) if not dist['S3']['triggered'] else 999
-        v1_away = abs(dist['V1']['pct_away']) if not dist['V1']['triggered'] else 999
+        s3_pct = dist['S3']['pct_away']
+        s3_away = abs(s3_pct) if (not dist['S3']['triggered']
+                                  and s3_pct is not None and not np.isnan(s3_pct)) else 999
+        v1_pct = dist['V1']['pct_away']
+        v1_away = abs(v1_pct) if (not dist['V1']['triggered']
+                                  and v1_pct is not None and not np.isnan(v1_pct)) else 999
         min_away = min(s3_away, v1_away)
         if min_away <= 2.5:
             return {"level": "yellow",
