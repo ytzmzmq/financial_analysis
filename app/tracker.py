@@ -13,7 +13,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-from app.db import save_signal, get_latest_score
+from app.db import save_signal, get_latest_score, get_latest_alert_level
 
 try:
     import streamlit as st
@@ -110,6 +110,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
 
     # 获取上一次 score（用于 alert_level 计算，排除当天数据）
     prev_score = get_latest_score(before_date=actual_last_date)
+    prev_alert = get_latest_alert_level(before_date=actual_last_date)
 
     # Alert level（传入 config，V5.2 按 tier 判定）
     alert = alert_level(df, prev_score, config=config)
@@ -160,6 +161,7 @@ def _compute(data: dict, custom_price: float = None) -> dict:
         "rules_status": result.rules_status,
         "distance_to_trigger": dist,
         "alert": alert,
+        "prev_alert_level": prev_alert,
         "df": df,
         "model_version": result.model_version,
         "bottom_prob": bottom_prob,

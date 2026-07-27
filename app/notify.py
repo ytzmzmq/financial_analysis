@@ -194,16 +194,25 @@ def run(dry_run: bool = False, test_push: bool = False):
 
     content = "\n".join(lines)
 
-    # 根据警报级别决定是否推送
+    # 所有级别均推送
     level = alert["level"]
-    if level == "silent":
-        print(f"  Score={score:.1f} [{tier}] [{level}] — 静默, 不推送")
-        return
-
-    # YELLOW 或 RED: 推送
-    emoji = "🔴" if level == "red" else "🟡"
+    prev_level = sig.get("prev_alert_level")
     tier_label = tier.replace("_", " ").title()
-    title = f"{emoji} 医药板块{'ARMED!' if level == 'red' else '近触发预警'} [{tier_label}] (Score={score:.1f})"
+
+    if level == "red":
+        emoji = "🔴"
+        title = f"{emoji} 医药板块ARMED! [{tier_label}] (Score={score:.1f})"
+    elif level == "yellow":
+        emoji = "🟡"
+        title = f"{emoji} 医药板块近触发预警 [{tier_label}] (Score={score:.1f})"
+    else:
+        # silent: 区分"警报解除"和"常态区间"
+        if prev_level in ("yellow", "red"):
+            emoji = "✅"
+            title = f"{emoji} 医药板块警报解除 [{tier_label}] (Score={score:.1f})"
+        else:
+            emoji = "⚪"
+            title = f"{emoji} 医药板块常态区间 [{tier_label}] (Score={score:.1f})"
 
     print(f"  [{level.upper()}] {alert['message']}")
     print(f"  推送标题: {title}")

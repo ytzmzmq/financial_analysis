@@ -211,6 +211,22 @@ def get_latest_score(before_date: str = None):
     return 0.0
 
 
+def get_latest_alert_level(before_date: str = None):
+    """获取最近一条记录的 alert_level（用于状态变更检测），无记录返回 None"""
+    conn = _get_conn()
+    if before_date:
+        row = conn.execute(
+            "SELECT alert_level FROM signals WHERE date < ? ORDER BY date DESC LIMIT 1",
+            (before_date,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT alert_level FROM signals ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
 def get_live_signals(limit=200):
     """获取 live 信号列表（is_live_signal=1，按日期倒序）"""
     conn = _get_conn()
