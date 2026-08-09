@@ -1,5 +1,5 @@
-"""生成自包含 HTML 看板 — 图表库首次下载缓存，之后离线可用"""
-import sys, json, urllib.request, time
+"""生成自包含 HTML 看板 — 图表库使用仓库内 vendor 文件（离线可用）"""
+import sys, json, time
 from pathlib import Path
 from datetime import datetime
 import pandas as pd, numpy as np
@@ -7,18 +7,15 @@ import pandas as pd, numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 LW_CACHE = Path("data/lightweight-charts.min.js")
-LW_CDN = "https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"
 
 def _get_lw_js() -> str:
-    """优先读本地缓存，没有则下载一次并缓存"""
+    """读取仓库内 vendor 的图表库；不从 CDN 下载（供应链安全）"""
     if LW_CACHE.exists() and LW_CACHE.stat().st_size > 100_000:
         return LW_CACHE.read_text(encoding="utf-8")
-    print("下载图表库 (仅首次)...")
-    js = urllib.request.urlopen(LW_CDN, timeout=20).read().decode("utf-8")
-    LW_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    LW_CACHE.write_text(js, encoding="utf-8")
-    print(f"已缓存 {LW_CACHE} (后续离线)")
-    return js
+    raise RuntimeError(
+        f"缺少图表库文件 {LW_CACHE}。请从 git 恢复该 vendor 文件"
+        f"（git checkout -- {LW_CACHE}），不支持运行时从 CDN 下载。"
+    )
 
 CSS = """*{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937;padding:20px}

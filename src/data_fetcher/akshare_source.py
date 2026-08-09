@@ -8,19 +8,35 @@ except ImportError:
     ak = None
 
 def fetch_realtime_price() -> float | None:
-    """[Deprecated] 旧版: 通过 512170 ETF 代理获取涨跌幅"""
+    """[Deprecated] 旧版: 通过 512170 ETF 代理获取涨跌幅
+
+    安全说明: 该源为明文 HTTP，数据完整性无保证，仅作为 index_min_sw
+    不可用时的兜底。此处对返回值做严格合理性校验（有限正数价格 +
+    A股 ETF 涨跌停幅度约束），异常/疑似被篡改的数据直接丢弃。
+    """
     import urllib.request
+    MAX_ABS_PCT = 0.11  # A股 ETF 涨跌停 10%，留 1% 容差
     try:
         req = urllib.request.Request(
             "http://hq.sinajs.cn/list=sh512170",
             headers={"Referer": "https://finance.sina.com.cn"})
         resp = urllib.request.urlopen(req, timeout=5).read().decode("gbk", errors="ignore")
         parts = resp.split('"')[1].split(",")
+        if len(parts) < 4:
+            return None
         current = float(parts[3])   # 当前价
         prev_close = float(parts[2])  # 昨收
-        if prev_close > 0:
-            pct = (current / prev_close - 1)
-            return pct  # 返回涨跌幅
+        # 完整性校验：必须为有限正数，涨跌幅必须在涨跌停约束内
+        if not (current > 0 and prev_close > 0
+                and current == current and prev_close == prev_close):
+            return None
+        pct = (current / prev_close - 1)
+        if abs(pct) > MAX_ABS_PCT:
+            print(f"[AKShare][警告] ETF代理行情异常({pct*100:+.2f}% 超出涨跌停约束)，"
+                  f"疑似数据源错误或被篡改，已丢弃")
+            return None
+        print("[AKShare][警告] 使用明文HTTP兜底行情源，数据完整性无保证")
+        return pct
     except Exception:
         pass
     return None

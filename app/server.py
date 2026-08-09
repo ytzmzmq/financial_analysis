@@ -12,17 +12,66 @@
 """
 import sys
 import json
+import math
+import time
 import argparse
 import threading
 import webbrowser
 import traceback
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 DEFAULT_PORT = 8888
+
+# ═══════════════════════════════════════════════════════════════
+# 安全加固配置（安全扫描整改：未授权访问/资源耗尽/信息泄露）
+# ═══════════════════════════════════════════════════════════════
+# 仅接受本地回环 Host，抵御 DNS 重绑定
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# CSP：禁止加载外部脚本/框架，阻断注入的第三方资源
+CSP_POLICY = ("default-src 'self'; "
+              "script-src 'self' 'unsafe-inline'; "
+              "style-src 'self' 'unsafe-inline'; "
+              "img-src 'self' data:; "
+              "connect-src 'self'; "
+              "frame-ancestors 'none'; "
+              "base-uri 'self'")
+DASHBOARD_CACHE_TTL = 60    # 看板 HTML 缓存秒数（避免每次请求都 spawn 子进程）
+SIGNAL_CACHE_TTL = 30       # 信号计算缓存秒数（避免每次请求都拉外部行情）
+SIGNAL_CACHE_MAX = 32       # 试算价格缓存条目上限
+RATE_LIMIT_WINDOW = 10      # 限流窗口（秒）
+RATE_LIMIT_MAX = 60         # 窗口内单客户端最大请求数
+
+_server_port = DEFAULT_PORT
+_dash_cache = {"ts": 0.0, "body": None}
+_dash_cache_lock = threading.Lock()
+_signal_cache = {}
+_signal_cache_lock = threading.Lock()
+_rate_buckets = {}
+_rate_lock = threading.Lock()
+
+
+def _rate_limit_ok(client_ip: str) -> bool:
+    """简单滑动窗口限流；超限返回 False。"""
+    now = time.monotonic()
+    with _rate_lock:
+        ts_list = _rate_buckets.get(client_ip)
+        if ts_list is None:
+            ts_list = _rate_buckets[client_ip] = []
+        # 清理窗口外记录
+        while ts_list and now - ts_list[0] > RATE_LIMIT_WINDOW:
+            ts_list.pop(0)
+        if len(ts_list) >= RATE_LIMIT_MAX:
+            return False
+        ts_list.append(now)
+        # 防止字典无限增长
+        if len(_rate_buckets) > 1024:
+            _rate_buckets.clear()
+            _rate_buckets[client_ip] = ts_list
+        return True
 
 # ═══════════════════════════════════════════════════════════════
 # HTML 模板 — JS 动态从 /api/signal 拉取数据后渲染
@@ -549,8 +598,12 @@ function renderScoreChart(rows) {
       c.applyOptions({width: el.clientWidth || 900});
     });
   } catch(e) {
-    document.getElementById('score-history-chart').innerHTML =
-      '<div style="padding:20px;text-align:center;color:#ef4444">图表加载失败: '+e.message+'</div>';
+    const elChart = document.getElementById('score-history-chart');
+    elChart.textContent = '';
+    const errDiv = document.createElement('div');
+    errDiv.style.cssText = 'padding:20px;text-align:center;color:#ef4444';
+    errDiv.textContent = '图表加载失败: ' + e.message;
+    elChart.appendChild(errDiv);
   }
 }
 
@@ -564,10 +617,17 @@ async function loadErrors() {
     const hasError = errors.some(e => e.level === 'error');
     banner.className = 'error-banner' + (hasError ? '' : ' warning');
     banner.style.display = 'block';
-    banner.innerHTML = errors.slice(0, 5).map(e =>
-      '<div class="err-item"><span class="err-time">' + e.timestamp +
-      '</span>[' + e.source + '] ' + e.message + '</div>'
-    ).join('');
+    banner.textContent = '';
+    errors.slice(0, 5).forEach(e => {
+      const item = document.createElement('div');
+      item.className = 'err-item';
+      const tm = document.createElement('span');
+      tm.className = 'err-time';
+      tm.textContent = e.timestamp;
+      item.appendChild(tm);
+      item.appendChild(document.createTextNode('[' + e.source + '] ' + e.message));
+      banner.appendChild(item);
+    });
   } catch(e) {}
 }
 
@@ -683,7 +743,68 @@ def _compute_and_serialize(custom_price: float = None) -> dict:
 
 class Handler(BaseHTTPRequestHandler):
 
+    # ── 安全门：Host/Origin 校验 + 限流（DNS 重绑定/跨站请求/资源耗尽防护）──
+    def _reject_unsafe(self) -> bool:
+        """不合规请求直接拒绝；返回 True 表示已拒绝。"""
+        # 1) Host 白名单（防 DNS 重绑定）
+        host = self.headers.get("Host", "")
+        hostname = host.rsplit(":", 1)[0].strip("[]").lower() if host else ""
+        host_port = None
+        if host.count(":") == 1:
+            try:
+                host_port = int(host.rsplit(":", 1)[1])
+            except ValueError:
+                self._respond(400, b'{"error": "bad request"}',
+                              "application/json; charset=utf-8")
+                return True
+        if hostname not in ALLOWED_HOSTS or (
+                host_port is not None and host_port != _server_port):
+            self._respond(403, b'{"error": "forbidden"}',
+                          "application/json; charset=utf-8")
+            return True
+        # 2) Origin / Sec-Fetch-Site（拒绝跨站发起的请求；Origin: null
+        #    可由沙箱 iframe 伪造，同样拒绝。同源页面自身请求不带 Origin 头）
+        origin = self.headers.get("Origin")
+        if origin:
+            allowed_origins = {f"http://127.0.0.1:{_server_port}",
+                               f"http://localhost:{_server_port}"}
+            if origin not in allowed_origins:
+                self._respond(403, b'{"error": "forbidden"}',
+                              "application/json; charset=utf-8")
+                return True
+        sec_site = self.headers.get("Sec-Fetch-Site", "").lower()
+        if sec_site == "cross-site":
+            self._respond(403, b'{"error": "forbidden"}',
+                          "application/json; charset=utf-8")
+            return True
+        # 3) 限流
+        client_ip = self.client_address[0] if self.client_address else "?"
+        if not _rate_limit_ok(client_ip):
+            self._respond(429, b'{"error": "too many requests"}',
+                          "application/json; charset=utf-8")
+            return True
+        return False
+
+    def _respond(self, status: int, body: bytes, content_type: str,
+                 cache: str = "no-cache"):
+        """统一响应出口：附带 CSP 与 nosniff 头。"""
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", len(body))
+        self.send_header("Cache-Control", cache)
+        self.send_header("Content-Security-Policy", CSP_POLICY)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _respond_json_error(self, status: int, message: str):
+        body = json.dumps({"error": message}, ensure_ascii=False).encode("utf-8")
+        self._respond(status, body, "application/json; charset=utf-8")
+
     def do_GET(self):
+        if self._reject_unsafe():
+            return
         if self.path.startswith("/api/signal"):
             self._serve_api()
         elif self.path.startswith("/api/history"):
@@ -699,14 +820,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_dash(self):
         import subprocess, sys
-        # 每次请求重新生成看板，保证数据最新
-        subprocess.run([sys.executable, "app/dashboard.py"], capture_output=True)
-        body = Path("dashboard.html").read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", len(body))
-        self.end_headers()
-        self.wfile.write(body)
+        # TTL 缓存：窗口内复用已生成的看板，避免每次请求 spawn 子进程
+        now = time.monotonic()
+        with _dash_cache_lock:
+            fresh = (_dash_cache["body"] is not None and
+                     now - _dash_cache["ts"] < DASHBOARD_CACHE_TTL)
+        if not fresh:
+            subprocess.run([sys.executable, "app/dashboard.py"],
+                           capture_output=True, timeout=120)
+            try:
+                body = Path("dashboard.html").read_bytes()
+            except OSError:
+                self._respond_json_error(500, "dashboard unavailable")
+                return
+            with _dash_cache_lock:
+                _dash_cache["ts"] = time.monotonic()
+                _dash_cache["body"] = body
+        else:
+            with _dash_cache_lock:
+                body = _dash_cache["body"]
+        self._respond(200, body, "text/html; charset=utf-8")
 
     def _serve_history(self):
         """从 SQLite 读取历史信号记录"""
@@ -714,19 +847,10 @@ class Handler(BaseHTTPRequestHandler):
             from app.db import get_history
             rows = get_history()
             body = json.dumps(rows, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(body)
+            self._respond(200, body, "application/json; charset=utf-8")
         except Exception as e:
-            body = json.dumps({"error": str(e)}, ensure_ascii=False).encode()
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            print(f"  [ERROR] history: {e}\n{traceback.format_exc()}")
+            self._respond_json_error(500, "internal server error")
 
     def _serve_errors(self):
         """返回最近 24 小时内的系统错误/警告日志"""
@@ -734,31 +858,18 @@ class Handler(BaseHTTPRequestHandler):
             from app.db import get_recent_errors
             errors = get_recent_errors(hours=24)
             body = json.dumps(errors, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(body)
+            self._respond(200, body, "application/json; charset=utf-8")
         except Exception as e:
-            body = json.dumps({"error": str(e)}, ensure_ascii=False).encode()
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            print(f"  [ERROR] errors-api: {e}\n{traceback.format_exc()}")
+            self._respond_json_error(500, "internal server error")
 
     def _serve_lw(self):
         js_path = Path("data/lightweight-charts.min.js")
         if not js_path.exists():
-            self.send_response(404); self.end_headers(); return
+            self._respond(404, b"", "application/javascript")
+            return
         body = js_path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/javascript")
-        self.send_header("Cache-Control", "max-age=86400")
-        self.send_header("Content-Length", len(body))
-        self.end_headers()
-        self.wfile.write(body)
+        self._respond(200, body, "application/javascript", cache="max-age=86400")
 
     def _serve_static(self):
         fname = self.path.split("/")[-1]
@@ -766,50 +877,62 @@ class Handler(BaseHTTPRequestHandler):
         if fpath.exists():
             body = fpath.read_bytes()
             ct = "application/javascript" if fname.endswith(".js") else "application/octet-stream"
-            self.send_response(200)
-            self.send_header("Content-Type", ct)
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            self._respond(200, body, ct)
         else:
-            self.send_response(404); self.end_headers()
+            self._respond(404, b"", "application/octet-stream")
 
     def _serve_api(self):
         from urllib.parse import urlparse, parse_qs
         qs = parse_qs(urlparse(self.path).query)
-        custom_price = float(qs["price"][0]) if "price" in qs else None
+        custom_price = None
+        if "price" in qs:
+            try:
+                custom_price = float(qs["price"][0])
+            except (ValueError, IndexError):
+                self._respond_json_error(400, "invalid price parameter")
+                return
+            if not math.isfinite(custom_price) or not (0 < custom_price < 1e7):
+                self._respond_json_error(400, "invalid price parameter")
+                return
         print(f"  [{datetime.now():%H:%M:%S}] 拉取数据中...")
         try:
-            payload = _compute_and_serialize(custom_price=custom_price)
+            # TTL 缓存：同一试算价格窗口内复用结果，避免频繁拉外部行情
+            cache_key = round(custom_price, 2) if custom_price is not None else None
+            now = time.monotonic()
+            payload = None
+            with _signal_cache_lock:
+                hit = _signal_cache.get(cache_key)
+                if hit and now - hit[0] < SIGNAL_CACHE_TTL:
+                    payload = hit[1]
+            if payload is None:
+                payload = _compute_and_serialize(custom_price=custom_price)
+                with _signal_cache_lock:
+                    if len(_signal_cache) >= SIGNAL_CACHE_MAX:
+                        oldest = min(_signal_cache, key=lambda k: _signal_cache[k][0])
+                        del _signal_cache[oldest]
+                    _signal_cache[cache_key] = (time.monotonic(), payload)
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(body)
+            self._respond(200, body, "application/json; charset=utf-8")
             print(f"  [{datetime.now():%H:%M:%S}] 完成 ({payload['elapsed_s']}s) — Score={payload['score']:.1f} [{payload['signal_tier']}] ({payload['model_version']}) [{payload['alert']['level'].upper()}]")
         except Exception as e:
             tb = traceback.format_exc()
             print(f"  [ERROR] {e}\n{tb}")
-            body = json.dumps({"error": str(e), "detail": tb}, ensure_ascii=False).encode()
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            self._respond_json_error(500, "internal server error")
 
     def log_message(self, fmt, *args):
         pass  # 屏蔽默认 access log，用自定义日志
 
 
 def main():
+    global _server_port
     parser = argparse.ArgumentParser(description="医药板块实时监控看板")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
+    _server_port = args.port
 
-    server = HTTPServer(("127.0.0.1", args.port), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server.daemon_threads = True
     url = f"http://127.0.0.1:{args.port}"
 
     print("=" * 50)
