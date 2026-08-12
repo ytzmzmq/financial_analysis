@@ -52,7 +52,8 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add dashboard.html data/processed/signals.db 2>/dev/null || true
+          # -f 必需：这两个路径在 .gitignore 中，普通 add 会静默跳过
+          git add -f dashboard.html data/processed/signals.db 2>/dev/null || true
           git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) ${{ steps.parsed.outputs.alert }}" && git push || true)
 
       - name: Issue (RED)
