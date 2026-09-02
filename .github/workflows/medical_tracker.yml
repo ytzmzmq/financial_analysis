@@ -47,14 +47,30 @@ jobs:
         timeout-minutes: 5
         run: timeout 300 python app/dashboard.py || true
 
+      # ── 农业板块子项目（共享同一次运行与推送；医药代码零改动） ──
+      - name: Run agri monitor
+        id: agri
+        run: |
+          pip install -r agriculture/requirements.txt
+          timeout 900 python agriculture/app/tracker_agri.py 2>&1 | tee output_agri.txt || true
+          python agriculture/app/ci_parse_agri.py
+
+      - name: Load agri results
+        id: agri_parsed
+        run: cat alert_result_agri.txt >> $GITHUB_OUTPUT
+
+      - name: Generate agri dashboard
+        timeout-minutes: 5
+        run: timeout 300 python agriculture/app/dashboard_agri.py || true
+
       - name: Commit
         timeout-minutes: 2
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          # -f 必需：这两个路径在 .gitignore 中，普通 add 会静默跳过
-          git add -f dashboard.html data/processed/signals.db 2>/dev/null || true
-          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) ${{ steps.parsed.outputs.alert }}" && git push || true)
+          # -f 必需：这些路径在 .gitignore 中，普通 add 会静默跳过
+          git add -f dashboard.html data/processed/signals.db dashboard_agri.html agriculture/data/processed/signals.db 2>/dev/null || true
+          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) 医药:${{ steps.parsed.outputs.alert }} 农业:${{ steps.agri_parsed.outputs.alert }}" && git push || true)
 
       - name: Issue (RED)
         if: steps.parsed.outputs.alert == 'red'
@@ -68,4 +84,18 @@ jobs:
               title: `ARMED! Score=${{ steps.parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
               body: '```\n' + out + '\n```\n\nV5.2 四因子两层判定 (n_factors>=2 + tier)',
               labels: ['armed','alert']
+            });
+
+      - name: Agri Issue (RED)
+        if: steps.agri_parsed.outputs.alert == 'red'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
+        with:
+          script: |
+            const fs = require('fs');
+            const out = fs.existsSync('output_agri.txt') ? fs.readFileSync('output_agri.txt','utf8').slice(0,4000) : '';
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `农业信号! Score=${{ steps.agri_parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
+              body: '```\n' + out + '\n```\n\nV1.2 周期主导：cycle_score 迟滞门 + 恐慌加速',
+              labels: ['agri-alert','alert']
             });
