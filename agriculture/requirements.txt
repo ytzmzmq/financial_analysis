@@ -1,0 +1,8 @@
+# 农业板块子项目依赖（与根 requirements.txt 并存；根文件为医药项目所用，勿改）
+# 本文件在 CI 中按需安装：pip install -r agriculture/requirements.txt
+akshare==1.18.83
+pandas==3.0.5
+numpy==2.5.1
+scipy==1.18.1
+statsmodels==0.15.0
+openpyxl==3.1.5

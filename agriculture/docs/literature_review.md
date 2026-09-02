@@ -105,7 +105,61 @@
 
 ---
 
-## §10 文献 → 模型映射总表
+## §10 连跌序列与基本面的关系（2026-09-02 追加调研，应用户要求）
+
+> 用户问题：连续跌 n 天的概率/后续走势与基本面有什么关系？如何用于判断买入信号？
+> 文献给出的统一答案是：**连跌不是同质的——"为什么跌"决定了"会不会反弹"**。可归纳为三条机制：
+> ①流动性/非信息冲击 → 反弹（该抄）；②基本面现金流利空 → 惯性（不该抄）；③市场状态/情绪/估值 → 决定反弹的幅度与持有半年的期望收益。
+
+### §10.1 成交量条件：高量下跌可抄，缩量阴跌危险
+
+36. **Campbell, J. Y., Grossman, S. J., & Wang, J. (1993).** Trading Volume and Serial Correlation in Stock Returns. *The Quarterly Journal of Economics*, 108(4), 905–939. ✅ [JSTOR](https://www.jstor.org/stable/2118454)
+   理论+实证：高成交量伴随的下跌源于非信息的流动性/避险抛售，被做市商吸收后**倾向于反转**；低量下跌反映永久性信息，几乎不反转。→ **"放量下跌"的连跌比"缩量阴跌"的连跌更值得买**——这是 L-B2 层第一条件变量。
+37. **Avramov, D., Chordia, T., & Goyal, A. (2006).** Liquidity and Autocorrelations in Individual Stock Returns. *The Journal of Finance*, 61(5), 2365–2394. ✅ [Wiley](https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1540-6261.2006.01060.x)
+   负自相关（反转）强度与流动性、波动率、市值相关：小盘、高波动、低流动性股票反转更强。→ 反转概率本身是状态依存的，需要按波动/流动性状态分层估计。
+
+### §10.2 信息来源条件：行业共同利空不反弹，市场流动性冲击反弹
+
+38. **Hameed, A., & Mian, G. M. (2015).** Industries and Stock Return Reversals. *Journal of Financial and Quantitative Analysis*, 50(1-2), 89–117. ✅ [Cambridge](https://www.cambridge.org/core/journals/journal-of-financial-and-quantitative-analysis/article/industries-and-stock-return-reversals/92B5101FBEA7B40717D46DB60913BF41)
+   行业内部同涨同跌后的反转是流动性驱动的；而**跨行业分化出的下跌反映行业层面现金流新闻（基本面），短期不反转**。→ 对本项目的直接含义：农业指数的连跌若由行业基本面利空（猪价大跌、政策、疫病）驱动，**短期反弹概率显著更低**；若由大盘流动性拖累驱动（板块独跌/跟跌），反弹概率更高。必须把"板块跌幅 − 大盘β调整后跌幅"的残差方向作为条件变量。
+39. **Hameed, A., Kang, W., & Viswanathan, S. (2010).** Stock Market Declines and Liquidity. *The Journal of Finance*, 65(1), 257–293. ✅ [Wiley](https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1540-6261.2009.01529.x)
+   市场下跌期流动性系统性枯竭（套利者资金约束收紧），下跌状态短期内自我强化。→ **大盘处于弱势（如沪深300 < MA200）时，板块连跌的反弹概率要整体下调**——连跌概率表必须按大盘状态分两层。
+
+### §10.3 状态与情绪条件：决定反弹幅度与半年期望收益
+
+40. **Da, Z., Liu, Q., & Schaumburg, E. (2014).** A Closer Look at the Short-Term Return Reversal. *Management Science*, 60(3), 658–674. ✅（核验纠正：Management Science 而非 RFS；doi:10.1287/mnsc.2013.1766）
+   分解短期反转：流动性提供是主要成分，且反转在流动性好的标的最强。→ 短期（5–20 日）反弹概率由流动性/波动状态主导；与 §11.4 的长期条件形成"短看流动性、长看估值"的分工。
+41. **Baker, M., & Wurgler, J. (2006).** Investor Sentiment and the Cross-Section of Stock Returns. *The Journal of Finance*, 61(4), 1645–1680. ✅ [Wiley](https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.2006.00885.x)
+   低情绪期买入高投机性股票的后续收益显著更高。→ 连跌发生时的市场情绪分位（A股用换手率代理，见 §6 的 CH-3 PMO）是半年期望收益的条件变量。
+42. **Campbell, J. Y., & Shiller, R. J. (1998).** Valuation Ratios and the Long-Run Stock Market Outlook. *Journal of Portfolio Management*, 24(2), 11–26. ✅ [PMR](https://www.pm-research.com/content/iijpormgmt/24/2/11)
+   估值比率对短期几乎无预测力，但对 5–10 年长期收益有显著预测力。→ **连跌后"5–20 日反弹概率"与"半年收益期望"是两套条件体系**：前者看成交量/波动/流动性，后者看估值分位/情绪/周期相位——L-B2 表按此双时间尺度设计。
+43. **Nagel, S. (2012).** Evaporating Liquidity（综述 §1 第 4 条，此处复用）：高波动/低流动性期反转溢价最大 → 波动率分位同时进入短、长两套条件表。
+
+### §10.4 农业特有条件：猪周期相位决定"利空是否已定价"（文献整合，本项目原创检验）
+
+- 蛛网/畜产品周期文献（§3：Ezekiel 1938；Rosen et al. 1994；Wang et al. 2020）指出：猪价处于**周期谷底**（深度亏损、产能去化）时，价格再跌空间有限且下一轮扩张在途——此时的板块连跌多为"利空尾声"，历史反弹赔率最好；猪价处于**周期峰顶回落初期**时，基本面利空刚开始传导，连跌是"利空中途"，不应抄底。
+- 结合 §10.2（Hameed & Mian）：**猪价下跌驱动的板块连跌属于行业现金流利空**，其是否可买取决于猪周期相位（利空是否已定价）而非连跌长度本身。
+- 该关系属于文献推论的原创整合，没有现成外文实证 → 按反过拟合协议，仅在训练段检验、测试段验证一次，样本不足的分层单元必须合并。
+
+### §10.5 结论：L-B2"基本面条件化连跌概率表"设计（写回策略提案 §4 L-B）
+
+| 条件变量 | 分层 | 影响短概率（5–20日反弹） | 影响半年期望收益 | 文献 |
+|---|---|---|---|---|
+| 当日量能 | 高量 vs 缩量 | 高量↑（流动性冲击） | 间接 | CGW 1993 |
+| 波动率分位 | 高 vs 低 | 高↑（反转溢价） | 高（同时风险↑） | Nagel 2012; ACG 2006 |
+| 板块残差方向 | 独跌(跑赢大盘的跌幅) vs 跟跌 | 跟跌↑（流动性） | 间接 | Hameed-Mian 2015 |
+| 大盘状态 | MA200 上 vs 下 | 上↑ | 上↑ | Hameed et al. 2010 |
+| 猪周期相位 | 谷/扩张/峰/收缩 | 谷↑、峰↓ | 谷↑↑、峰↓↓ | §3 + §11.4 整合 |
+| 情绪(换手分位) | 低 vs 高 | 间接 | 低↑ | BW 2006; LSY 2019 |
+| 估值分位 | 低 vs 高 | 短期≈无效 | 低↑ | Campbell-Shiller 1998 |
+
+规则：单变量分层表（每层 ≥30 样本，否则合并并标注）；二维交叉只允许"波动率×量能"与"猪相位×估值"两组（预注册）；全部仅在训练段估计、测试段验证一次。输出为用户可读的"连跌买入参考卡"：当前连跌 k 天 + 各条件下历史 P(转涨) 与 5/20/60 日条件收益中位数 + 对应文献解释。
+
+
+
+---
+
+## §11 文献 → 模型映射总表
 
 | 需求 | 文献支撑 | 落地组件 |
 |---|---|---|

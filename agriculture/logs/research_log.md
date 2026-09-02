@@ -60,4 +60,20 @@
   - Atems ENSO 论文：期刊为 *Water Resources and Economics*（2020-10，doi:10.1016/j.wre.2020.100157），作者 Atems, Maresca, Ma & McGraw（检索页摘要误标为 IRFA，已纠正）。
   - Cederburg, O'Doherty, Wang & Yan (2020) *On the performance of volatility-managed portfolios*, JFE ✓ (doi:10.1016/j.jfineco.2020.04.015)。
   - Gorton & Rouwenhorst (2006)：*Financial Analysts Journal* 62(2)（纠正为 RFS 的常见误引）。
-- 综述最终定稿 36 条，标注 ✅/△ 核验状态。
+- 综述最终定稿 36 条，标注 ✅/△ 核验状态。（注：后续追加调研后定稿 42 条，结构调整为 §10 连跌×基本面、§11 映射总表）
+
+## [R-13] 2026-09-02 | 追加调研：连跌概率与基本面的关系（用户新需求）
+- 背景：用户确认建模策略后追加需求——找到"连续跌 n 天的概率/后续走势与基本面的关系"，作为买入信号判断依据。
+- 检索词：`Campbell Grossman Wang trading volume serial correlation reversal`、`Hameed Mian industries stock return reversals fundamental`、`Da Liu Schaumburg short-term return reversal`、`Baker Wurgler investor sentiment cross-section`、`Campbell Shiller valuation ratios long-run outlook`、`Hameed Kang Viswanathan stock market declines liquidity`、`Avramov Chordia Goyal liquidity autocorrelations`。
+- 结果（7 篇全部核验）：CGW (1993, QJE) 高量下跌=流动性冲击→反转、缩量下跌=信息→惯性；Hameed & Mian (2015, JFQA) 行业基本面型下跌短期不反转、流动性型下跌反转；Hameed et al. (2010, JF) 大盘下跌期流动性枯竭、跌势自我强化；Avramov et al. (2006, JF) 反转强度随波动率/非流动性上升；Da et al. (2014, **Management Science**，纠正误记为 RFS) 反转成分分解；Baker & Wurgler (2006, JF) 低情绪→后续高收益；Campbell & Shiller (1998, JPM) 估值预测长期而非短期。
+- 综合结论写入综述新 §10：短尺度反弹概率由"量能/波动/大盘/下跌来源（流动性 vs 基本面）"决定；半年尺度期望收益由"估值/情绪/猪周期相位"决定；农业特有整合假设（猪周期相位→利空是否已定价）作为原创检验项。
+- 落地：L-B 层升级为 L-B2"基本面条件化连跌概率表"（7 个条件变量，见 strategy_proposal.md §4 L-B）。
+
+## [R-14] 2026-09-02 | 本地数据源可用性探测（M1 前置）
+- 前提：本机所有 python 环境（Conda base / Conda pytorch / Python312）均无 akshare → 为农业项目在 Python312 安装 akshare 1.18.83 + pandas 3.0.5 + numpy 2.5.1 + scipy 1.18.1 + statsmodels 0.15.0（清华镜像），依赖版本与根 requirements.txt 对齐，另建 `agriculture/requirements.txt`。
+- 探测脚本：`data/raw/probe_akshare.py` + `probe_akshare2.py`，完整报告 `data/raw/data_probe_20260902.md`。
+- 关键结果：
+  - ✅ 主链路全通：申万农林牧渔 801010（6446 行，约 2000 年起日线）、中证农业 000122（3616 行，约 2011 起）、沪深300（5984 行）、玉米/豆粕期货主力（2004/2000 年起）、CPI/PPI/M1M2、两融。
+  - ✅ 猪周期数据族：`index_hog_spot_price()` 2015-01 起周频 585 行（含 4/6/12 月均线）——L-A 猪价区制 + L-B2 猪相位条件的锚；生猪期货 LH0（2021 起，日频）；`futures_hog_core/cost/supply`（产能/成本/供给，但仅 2025-09 起，暂不入模）。
+  - ❌ 三个缺口与替代：东财 `index_zh_a_hist` 被代理拦截（改用新浪源 `stock_zh_index_daily`，已验证）；乐咕估值接口不含农林牧渔、中证官网 csindex 估值仅近 20 个交易日（估值维度改用价格 5 年分位 + 相对强弱替代）；2015 年前猪价无免费源（猪价区制样本定为 2015 起，约 2.5 轮周期）。
+- 结论：主链路 100% 可用、无需付费数据源，M1 数据管道可按 proposal §2.2 动工；决策点 6 落定为「index_hog_spot_price（周频历史）+ LH0（日频补充）」双源。
