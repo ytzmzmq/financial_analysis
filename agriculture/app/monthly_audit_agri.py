@@ -70,6 +70,25 @@ def main() -> None:
                     f"top 样本 {int(top.sum())}）")
         log("")
 
+    # ── A2. alphalens 式 IC 诊断（高星研究范式 adopted：quantopian/alphalens） ──
+    log("\n## A2. 因子 Rank-IC 诊断（alphalens 范式，滚动 250 日）\n")
+    for name in cfg["factors"]["panic_factors"]:
+        s = factors[name]
+        f20r = fwd20.rolling(250, min_periods=125).rank(pct=True)
+        s_r = s.rolling(250, min_periods=125).rank(pct=True)
+        # Rank IC：因子水平与 20 日前瞻收益的时序秩相关（单资产时间序列版）
+        ic = s_r.corr(f20r)  # 全样本粗 IC
+        ic_series = s_r.rolling(250).corr(f20r).dropna()
+        icir = ic_series.mean() / ic_series.std() if ic_series.std() > 0 else np.nan
+        # 分位单调性：Q1/Q2/Q3 的 20 日前瞻收益均值应单调递增
+        qbin = pd.qcut(s_r.dropna(), 3, labels=["Q1", "Q2", "Q3"], duplicates="drop")
+        qmeans = [fwd20[qbin.index[qbin == q]].mean() for q in ["Q1", "Q2", "Q3"]]
+        mono = all(qmeans[i] <= qmeans[i + 1] for i in range(len(qmeans) - 1))
+        log(f"- `{name}`：全样本 Rank-IC {ic:+.3f}，ICIR {icir:+.2f}，"
+            f"Q1/Q2/Q3 前瞻收益 {qmeans[0]:+.2%}/{qmeans[1]:+.2%}/{qmeans[2]:+.2%}，"
+            f"单调性 {'✓' if mono else '✗ 非单调（衰减信号）'}")
+    log("")
+
     # ── B. 周期门触发频率漂移 ──
     log("\n## B. 周期门持仓占比\n")
     cs = cond["cycle_score"]
