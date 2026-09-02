@@ -163,7 +163,8 @@ ul{{font-size:13px;line-height:1.8}} .warn{{background:#fff8e1;border-left:4px s
             ['日期', '警报', '建议', '收盘', 'CycleScore', '猪相位', '连跌'])}
 
 <p class="note">数据源 AKShare（申万指数 / 新浪指数与期货 / 搜猪网-生猪指数 / 宏观月度，宏观按次月 15 日可得对齐防前视）。
-理论支撑与反过拟合协议见仓库 agriculture/docs/。本看板仅为研究工具，不构成投资建议。</p>
+完整原理与使用手册见仓库 <a href="agriculture/REPORT.md">agriculture/REPORT.md</a>（GitHub 网页上直接点击）。
+本看板仅为研究工具，不构成投资建议。</p>
 </div></body></html>"""
 
     OUT_PATH.write_text(html, encoding="utf-8")
