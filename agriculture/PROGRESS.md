@@ -18,7 +18,7 @@
 | 5. 模型与回测（严格训练/测试分离） | ✅ 完成 2026-09-02 | V1.2 冻结；PBO 0.275 过；RC/DSR 未显著如实披露 |
 | 6. 接入每日 14:45 共享推送 | ✅ 完成 2026-09-02 | workflow 增量接入，医药代码零改动 |
 | 7. 文档与看板 | ✅ 完成 2026-09-02 | README + dashboard_agri.html + 月度审计 + selfcheck |
-| 8. 安全审查 + 推送 | 🔄 进行中 | codex-security（DeepSeek 驱动）扫描通过后推送 |
+| 8. 安全审查 + 推送 | ✅ 完成 2026-09-02 | codex-security findings=[] coverage=complete；推送 + workflow_dispatch 实测 Run #75 全步骤 success，自动提交"医药:silent 农业:yellow" |
 
 ---
 
