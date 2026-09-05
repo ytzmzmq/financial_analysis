@@ -7,3 +7,6 @@ data/raw/
 .idea/
 .claude/settings.local.json
 .workbuddy/
+jobs_tmp.json
+logs_raw.txt
+logs_tmp.zip
