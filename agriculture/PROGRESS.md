@@ -114,7 +114,30 @@ agriculture/
 
 ### 当前状态
 
-代码全部就绪，待安全审查（codex-security）后推送 GitHub；首个 CI 运行于推送后当日 14:45（北京时间）触发。
+已部署并验证（Run #75 全步骤 success）。
+
+---
+
+## 第 5 章：可见性增强与信号库回填（2026-09-03/04）
+
+### 步骤 5.1 每日推送可见性排查 ✅
+
+- 现象：用户反馈"每天的推送不包括农业板块"。
+- 排查：Run #76/#77（定时）实际全部成功，提交内容含 `agriculture/data/processed/signals.db` 与 `dashboard_agri.html`，标题含"农业:yellow"——**农业一直在推送，但藏在二进制与 2 行 diff 里，不可见**。
+- 发现的数据事实：申万指数接口在 Actions 运行时点（约北京时间 19:45）数据仅到 T-1/T-2，CI 每天对同一数据日 INSERT OR REPLACE（信号语义无碍：T+1 执行；记录为已知滞后）。
+
+### 步骤 5.2 可见性增强 ✅
+
+- `ci_parse_agri.py` v2：解析事件/持仓/周期/猪相位/恐慌分/连跌 → 一行快照；
+- 提交标题升级为 `[auto] 日期 医药:x 农业:y（持有 | 持仓是 | 周期扩张 | 猪扩张 | 恐慌57 | 连跌1天）`；
+- 新增 **Agri Daily Issue**：RED/YELLOW 日在滚动日报 issue（标签 `agri-daily`）追加当日信号全文，RED 另开警报 issue——进入 GitHub 通知流；
+- 根 README 顶部加入农业看板/报告入口；
+- `agriculture/data/raw/cache/*.csv`（1.5MB）入库：Actions 无本地缓存，单数据源故障时可回退到最近缓存（韧性）。
+
+### 步骤 5.3 历史信号回填 ✅
+
+- `scripts/backfill_signals.py`：冻结模型全历史回放，6445 行回填（is_live=0），实盘行 INSERT OR IGNORE 保留；
+- 远端 CI 已写的实盘行（09-01/09-02）合并保留，库内 6447 行（实盘 2 / 回溯 6445）。
 
 ---
 

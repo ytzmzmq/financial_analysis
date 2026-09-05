@@ -6,3 +6,4 @@ data/raw/
 .vscode/
 .idea/
 .claude/settings.local.json
+.workbuddy/

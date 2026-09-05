@@ -212,6 +212,20 @@ def _multi_cond_table(streak: pd.Series, fwd: pd.DataFrame, cond: pd.Series,
     return pd.DataFrame(rows).set_index(["k", "cond_val"])
 
 
+def tables_from_records(tables_json: dict) -> dict[str, pd.DataFrame]:
+    """配置 JSON 里的冻结表 → DataFrame（恢复索引；tracker/回填共用）。"""
+    out = {}
+    for name, records in tables_json.items():
+        df = pd.DataFrame(records)
+        idx_cols = [c for c in ("n", "k", "cond_val") if c in df.columns]
+        if idx_cols:
+            df = df.set_index(idx_cols)
+            if df.index.nlevels == 1:
+                df.index.name = idx_cols[0]
+        out[name] = df
+    return out
+
+
 def current_streak_card(streak_today: int, cond_today: pd.Series,
                         tables: dict) -> dict:
     """生成"连跌买入参考卡"（tracker 每日输出）。"""

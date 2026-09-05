@@ -70,7 +70,9 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           # -f 必需：这些路径在 .gitignore 中，普通 add 会静默跳过
           git add -f dashboard.html data/processed/signals.db dashboard_agri.html agriculture/data/processed/signals.db 2>/dev/null || true
-          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) 医药:${{ steps.parsed.outputs.alert }} 农业:${{ steps.agri_parsed.outputs.alert }}" && git push || true)
+          # 农业数据缓存一并入库：Actions 无本地缓存，单数据源故障时可回退到昨日缓存
+          git add -f agriculture/data/raw/cache/*.csv 2>/dev/null || true
+          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) 医药:${{ steps.parsed.outputs.alert }} 农业:${{ steps.agri_parsed.outputs.alert }}（${{ steps.agri_parsed.outputs.summary }}）" && git push || true)
 
       - name: Issue (RED)
         if: steps.parsed.outputs.alert == 'red'
@@ -86,16 +88,40 @@ jobs:
               labels: ['armed','alert']
             });
 
-      - name: Agri Issue (RED)
-        if: steps.agri_parsed.outputs.alert == 'red'
+      - name: Agri Daily Issue (RED/YELLOW 滚动日报)
+        if: steps.agri_parsed.outputs.alert == 'red' || steps.agri_parsed.outputs.alert == 'yellow'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
         with:
           script: |
             const fs = require('fs');
             const out = fs.existsSync('output_agri.txt') ? fs.readFileSync('output_agri.txt','utf8').slice(0,4000) : '';
-            await github.rest.issues.create({
+            const label = 'agri-daily';
+            const list = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,
-              title: `农业信号! Score=${{ steps.agri_parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
-              body: '```\n' + out + '\n```\n\nV1.2 周期主导：cycle_score 迟滞门 + 恐慌加速',
-              labels: ['agri-alert','alert']
+              state: 'open', labels: label, per_page: 1
             });
+            const body = '## ' + new Date().toISOString().split('T')[0] + '（' + '${{ steps.agri_parsed.outputs.alert }}'.toUpperCase() + '）\n\n```\n' + out + '\n```\n看板：dashboard_agri.html ｜ 报告：agriculture/REPORT.md';
+            let issueNumber;
+            if (list.data.length > 0) {
+              issueNumber = list.data[0].number;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issueNumber, body: body
+              });
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: '农业板块每日信号（滚动日报，YELLOW/RED 更新）',
+                body: body, labels: [label]
+              });
+              issueNumber = created.data.number;
+            }
+            // RED 时再单独开一条警报 issue（保留医药 ARMED 的对称语义）
+            if ('${{ steps.agri_parsed.outputs.alert }}' === 'red') {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: `农业信号! Score=${{ steps.agri_parsed.outputs.score }} (${new Date().toISOString().split('T')[0]})`,
+                body: '```\n' + out + '\n```\n\nV1.2 周期主导：cycle_score 迟滞门 + 恐慌加速',
+                labels: ['agri-alert','alert']
+              });
+            }
