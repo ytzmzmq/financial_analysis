@@ -112,7 +112,7 @@ AKShare 免费数据（指数/期货/猪价/宏观/两融/利率）
 
 | 内容 | 位置 | 说明 |
 |---|---|---|
-| **每日看板**（主要入口） | 仓库根 `dashboard_agri.html` | 自包含网页，离线可开；每日 14:45 随推送更新 |
+| **线上看板**（主要入口） | <https://ytzmzmq.github.io/financial_analysis/dashboard_agri.html> | 每日 14:45 自动发布（GitHub Pages）；离线副本为仓库根 `dashboard_agri.html` |
 | 每日信号计算器 | `agriculture/app/tracker_agri.py` | CLI 与 CI 共用，输出警报 + 建议 + 参考卡 |
 | 信号历史数据库 | `agriculture/data/processed/signals.db` | SQLite，signals 表 + system_log 错误表 |
 | 冻结模型配置 | `agriculture/src/models/model_config_agri.json` | 阈值/冻结表/回测指标/版本披露（单一事实来源） |
@@ -121,7 +121,8 @@ AKShare 免费数据（指数/期货/猪价/宏观/两融/利率）
 | 月度审计 | `agriculture/app/monthly_audit_agri.py` | 因子漂移 + Rank-IC/ICIR（alphalens 范式）+ 数据健康 |
 | 数据源模块 | `agriculture/src/data_fetcher/akshare_source.py` | 9 类免费数据 + 缓存 + 防前视对齐 |
 | 文档 | `agriculture/docs/`（综述/策略/范式对照）、`agriculture/logs/`（研究/报错日志）、`PROGRESS.md` | 全过程留痕 |
-| 每日推送 | GitHub Actions `medical_tracker.yml` | 医药 + 农业**同一次运行、同一次 commit**，RED 各开 issue |
+| 每日推送 | GitHub Actions `medical_tracker.yml` | 医药+农业**同一次运行、同一次 commit、合并为一条微信**（标题 `医药:x 农业:y｜农业快照`）；RED/YELLOW 在滚动日报 issue（`agri-daily`）更新全文，RED 另开警报 issue |
+| 因子筛查与回填 | `scripts/screen_new_factors.py`、`scripts/backfill_signals.py` | 新候选因子三漏斗报告（不动冻结配置）；历史信号回填（is_live=0） |
 
 数据源全部免费：申万指数、新浪指数/期货、生猪价格指数（周频）与生猪期货 LH0、
 玉米/豆粕期货、CPI/PPI/M1M2、两融、10Y 国债利率。
@@ -130,10 +131,14 @@ AKShare 免费数据（指数/期货/猪价/宏观/两融/利率）
 
 ## 四、你应该怎么用（操作手册）
 
-### 4.1 每天 15:00 后，花 1 分钟看板
+### 4.1 每天 14:45 后：一条微信 + 1 分钟看板
 
-打开方式二选一：
-- **网页**：GitHub 仓库 → `dashboard_agri.html` → 点开（或 raw 链接直接在浏览器渲染）；
+**第一步（10 秒）· 微信推送**：CI 会把医药+农业合并成**一条** Server酱消息发到你微信，
+标题自含结论（如 `医药:silent 农业:yellow｜持有 | 周期扩张 | 恐慌57`）。
+
+**第二步（按需）· 看板详情**，三种打开方式任选：
+- **GitHub Pages（推荐）**：<https://ytzmzmq.github.io/financial_analysis/dashboard_agri.html>
+- **仓库文件**：GitHub 仓库 → `dashboard_agri.html`；
 - **本地**：拉取最新代码后双击根目录 `dashboard_agri.html`。
 
 按横幅颜色行动：
@@ -207,6 +212,8 @@ python agriculture/scripts/selfcheck.py        # 防前视/执行约束自检
 6. **数据源风险**：全部免费接口，生猪周频指数 2015 年才开始（此前猪周期仅由
    指数价格间接体现）。
 7. **本系统是研究工具，不构成投资建议**；基金有市场风险，入场资金请用闲钱。
+8. **微信推送依赖 Server酱免费额度**（5 条/天，本项目每天占 1 条）：额度耗尽或接口抖动时
+   推送会失败但不影响看板与数据更新——以看板为准；启用 Pages 后看板不再依赖本地文件。
 
 ---
 

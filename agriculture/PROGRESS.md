@@ -19,6 +19,9 @@
 | 6. 接入每日 14:45 共享推送 | ✅ 完成 2026-09-02 | workflow 增量接入，医药代码零改动 |
 | 7. 文档与看板 | ✅ 完成 2026-09-02 | README + dashboard_agri.html + 月度审计 + selfcheck |
 | 8. 安全审查 + 推送 | ✅ 完成 2026-09-02 | codex-security findings=[] coverage=complete；推送 + workflow_dispatch 实测 Run #75 全步骤 success，自动提交"医药:silent 农业:yellow" |
+| 9. 可见性与信号库回填 | ✅ 完成 2026-09-05 | 提交标题带农业快照、滚动日报 issue（agri-daily）、数据缓存入库、历史信号回填 6445 行、桌面通知 bat |
+| 10. 中期待做（ENSO/猪产业链/净值曲线） | ✅ 完成 2026-09-05 | ONI 接入 + 三因子筛查留档（enso_nina 反向强信号记 V1.3 候选）+ 看板净值对比曲线 |
+| 11. 微信合并推送 + GitHub Pages | ✅ 完成 2026-09-05 | 医药+农业合并为**每天一条微信**（医药代码零改动）；线上看板实测 200 |
 
 ---
 
@@ -209,3 +212,13 @@ agriculture/
   - 医药看板：https://ytzmzmq.github.io/financial_analysis/dashboard.html
 - 过程报错（均记录 error_log #15）：①heredoc 结束符带缩进导致脚本损坏（改 printf）；
   ②gh-pages 子仓库缺 user 配置（git config 移到 git init 之后）；③两次误提交临时诊断文件（已清理+ignore）。
+
+---
+
+## 当前基线（2026-09-05，全部实测）
+
+- **线上看板**：https://ytzmzmq.github.io/financial_analysis/dashboard_agri.html（落地页 `/`，医药看板 `/dashboard.html`）
+- **每日节奏**：14:45 CI 运行 → 合并微信推送 1 条（医药+农业，Server酱免费额度 5 条/天只占 1 条）→ 自动提交（标题含两板块级别与农业快照）→ 滚动日报 issue 更新（RED/YELLOW 日）→ Pages 看板刷新
+- **当前状态**：YELLOW ｜ 持仓中（周期扩张 −0.06，猪周期扩张，收缩概率 86%，恐慌分 57）
+- **模型**：V1.2 周期主导（cycle_score 迟滞门 + 恐慌加速），验证段年化 +9.3% vs B&H +0.2%；测试段超额 +12.6%、回撤 −32.9% vs −46.1%；7 天约束违规 0
+- **已知滞后**：申万指数接口在 CI 运行时点数据到 T-1/T-2（信号语义无碍，T+1 执行）

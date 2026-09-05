@@ -77,3 +77,19 @@
   - ✅ 猪周期数据族：`index_hog_spot_price()` 2015-01 起周频 585 行（含 4/6/12 月均线）——L-A 猪价区制 + L-B2 猪相位条件的锚；生猪期货 LH0（2021 起，日频）；`futures_hog_core/cost/supply`（产能/成本/供给，但仅 2025-09 起，暂不入模）。
   - ❌ 三个缺口与替代：东财 `index_zh_a_hist` 被代理拦截（改用新浪源 `stock_zh_index_daily`，已验证）；乐咕估值接口不含农林牧渔、中证官网 csindex 估值仅近 20 个交易日（估值维度改用价格 5 年分位 + 相对强弱替代）；2015 年前猪价无免费源（猪价区制样本定为 2015 起，约 2.5 轮周期）。
 - 结论：主链路 100% 可用、无需付费数据源，M1 数据管道可按 proposal §2.2 动工；决策点 6 落定为「index_hog_spot_price（周频历史）+ LH0（日频补充）」双源。
+
+## [R-15] 2026-09-05 | 高星研究范式对照（GitHub）
+- 用户要求参考 GitHub 高星的经济学/金融研究范式；用 GitHub API 核实星标：
+  OpenBB 72.6k、ai-hedge-fund 63.2k、qlib 48.2k、ML4T 20.8k、alphalens 4.4k、QuantEcon.py 2.4k。
+- 采纳：alphalens 式 Rank-IC/ICIR/分位单调性进入月度审计 §A2；qlib 的 point-in-time 与
+  实验注册对应本项目 selfcheck + 冻结配置版本化；ai-hedge-fund 作为反面参照（LLM 观点不进模型）。
+- 落档：`docs/paradigm_benchmark.md`。
+
+## [R-16] 2026-09-05 | 新增候选因子筛查（ENSO/猪粮比）
+- 数据：NOAA ONI（psl.noaa.gov oni.data，1950 起）接入并按"季节末月次月 15 日可得"防前视对齐；猪粮比代理=生猪指数/玉米期货。
+- 三漏斗结果（训练段 2005-2021，报告 data/processed/factor_screen_update.md）：
+  - `enso_nino`：t=+5.47 但前后半方向不一致 → FAIL；
+  - `enso_nina`：预注册方向(+1)下 t=−4.67 且前后半一致 → **拉尼娜活跃期农业股未来 20 日显著更差**；
+    按纪律不事后翻向，记为 V1.3 版本评审候选（方向 −1 重新预注册，下一轮校准的测试段届时检验）；
+  - `hog_corn_ratio`：样本 1695<2500 → SKIP（生猪指数 2015 起），待训练窗延展重评。
+- 纪律：本轮只出报告，冻结配置 V1.2 与测试段未动。

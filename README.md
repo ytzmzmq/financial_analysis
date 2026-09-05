@@ -3,12 +3,14 @@
 基于 V5.2 四因子分级判定的极端超跌状态检测系统，监控申万医药生物指数(801150)。不是底部预测器，是赔率改善状态识别器。
 
 > 📌 **本仓库还包含农业板块周期监控系统**（`agriculture/` 子目录，V1.2 周期主导架构）：
-> 每日 14:45 与医药**同一次运行、同一次推送**。
-> - 农业每日看板：[dashboard_agri.html](dashboard_agri.html)
-> - 农业项目报告（原理/内容/使用手册）：[agriculture/REPORT.md](agriculture/REPORT.md)
-> - 医药每日看板：[dashboard.html](dashboard.html)
-> 自动提交标题形如 `[auto] 日期 医药:级别 农业:级别（农业一行快照）`；
-> 农业为 RED/YELLOW 时会在滚动日报 issue（标签 `agri-daily`）更新全文。
+> 每日 14:45 与医药**同一次运行**，微信**合并为一条推送**（Server酱），自动提交标题形如
+> `[auto] 日期 医药:级别 农业:级别（农业一行快照）`。
+> - 🌐 在线看板（GitHub Pages）：
+>   [农业](https://ytzmzmq.github.io/financial_analysis/dashboard_agri.html) ｜
+>   [医药](https://ytzmzmq.github.io/financial_analysis/dashboard.html) ｜
+>   [落地页](https://ytzmzmq.github.io/financial_analysis/)
+> - 📖 农业项目报告（原理/内容/使用手册）：[agriculture/REPORT.md](agriculture/REPORT.md)
+> - 农业为 RED/YELLOW 时在滚动日报 issue（标签 `agri-daily`）更新全文，RED 另开警报 issue
 
 ## 快速开始
 
