@@ -1,0 +1,185 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 101351151978,
+      "run_id": 33982885456,
+      "workflow_name": "医药板块每日监控 + 推送",
+      "head_branch": "main",
+      "run_url": "https://api.github.com/repos/ytzmzmq/financial_analysis/actions/runs/33982885456",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOSpm-0s8AAAAXmP_Zag",
+      "head_sha": "6ab8d0e8e705406ac7d5317220e898cdf35c2812",
+      "url": "https://api.github.com/repos/ytzmzmq/financial_analysis/actions/jobs/101351151978",
+      "html_url": "https://github.com/ytzmzmq/financial_analysis/actions/runs/33982885456/job/101351151978",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-09-05T18:03:59Z",
+      "started_at": "2026-09-05T18:04:02Z",
+      "completed_at": "2026-09-05T18:08:13Z",
+      "name": "daily-check",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-09-05T18:04:03Z",
+          "completed_at": "2026-09-05T18:04:04Z"
+        },
+        {
+          "name": "Run actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-09-05T18:04:04Z",
+          "completed_at": "2026-09-05T18:04:05Z"
+        },
+        {
+          "name": "Run actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-09-05T18:04:05Z",
+          "completed_at": "2026-09-05T18:04:06Z"
+        },
+        {
+          "name": "Install",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-09-05T18:04:06Z",
+          "completed_at": "2026-09-05T18:04:27Z"
+        },
+        {
+          "name": "Verify code",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-09-05T18:04:27Z",
+          "completed_at": "2026-09-05T18:04:28Z"
+        },
+        {
+          "name": "Run monitor",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-09-05T18:04:28Z",
+          "completed_at": "2026-09-05T18:05:30Z"
+        },
+        {
+          "name": "Load results",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-09-05T18:05:30Z",
+          "completed_at": "2026-09-05T18:05:30Z"
+        },
+        {
+          "name": "Generate dashboard",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-09-05T18:05:30Z",
+          "completed_at": "2026-09-05T18:06:32Z"
+        },
+        {
+          "name": "Run agri monitor",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-09-05T18:06:32Z",
+          "completed_at": "2026-09-05T18:08:06Z"
+        },
+        {
+          "name": "Load agri results",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-09-05T18:08:06Z",
+          "completed_at": "2026-09-05T18:08:06Z"
+        },
+        {
+          "name": "Agri WeChat push",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-09-05T18:08:06Z",
+          "completed_at": "2026-09-05T18:08:08Z"
+        },
+        {
+          "name": "Generate agri dashboard",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-09-05T18:08:08Z",
+          "completed_at": "2026-09-05T18:08:08Z"
+        },
+        {
+          "name": "Commit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-09-05T18:08:08Z",
+          "completed_at": "2026-09-05T18:08:10Z"
+        },
+        {
+          "name": "Issue (RED)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 14,
+          "started_at": "2026-09-05T18:08:10Z",
+          "completed_at": "2026-09-05T18:08:10Z"
+        },
+        {
+          "name": "Agri Daily Issue (RED/YELLOW 滚动日报)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 15,
+          "started_at": "2026-09-05T18:08:10Z",
+          "completed_at": "2026-09-05T18:08:10Z"
+        },
+        {
+          "name": "Deploy dashboards to GitHub Pages",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 16,
+          "started_at": "2026-09-05T18:08:10Z",
+          "completed_at": "2026-09-05T18:08:10Z"
+        },
+        {
+          "name": "Post Run actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 31,
+          "started_at": "2026-09-05T18:08:10Z",
+          "completed_at": "2026-09-05T18:08:10Z"
+        },
+        {
+          "name": "Post Run actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 32,
+          "started_at": "2026-09-05T18:08:10Z",
+          "completed_at": "2026-09-05T18:08:11Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 33,
+          "started_at": "2026-09-05T18:08:11Z",
+          "completed_at": "2026-09-05T18:08:11Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/ytzmzmq/financial_analysis/check-runs/101351151978",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "runner_id": 1000000101,
+      "runner_name": "GitHub Actions 1000000101",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}

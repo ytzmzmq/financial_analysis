@@ -1,0 +1,589 @@
+﻿2026-09-05T18:04:03.7435555Z Current runner version: '2.337.0'
+2026-09-05T18:04:03.7459745Z ##[group]Runner Image Provisioner
+2026-09-05T18:04:03.7460974Z Hosted Compute Agent
+2026-09-05T18:04:03.7461581Z Version: 20260828.587
+2026-09-05T18:04:03.7462424Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-05T18:04:03.7463247Z Build Date: 2026-08-28T16:44:25Z
+2026-09-05T18:04:03.7463950Z Worker ID: {19cecfde-dc48-4eaa-8b7f-aacd04f0221d}
+2026-09-05T18:04:03.7464789Z Azure Region: westus
+2026-09-05T18:04:03.7465375Z ##[endgroup]
+2026-09-05T18:04:03.7467022Z ##[group]Operating System
+2026-09-05T18:04:03.7467760Z Ubuntu
+2026-09-05T18:04:03.7468292Z 24.04.4
+2026-09-05T18:04:03.7469220Z LTS
+2026-09-05T18:04:03.7469815Z ##[endgroup]
+2026-09-05T18:04:03.7470426Z ##[group]Runner Image
+2026-09-05T18:04:03.7471110Z Image: ubuntu-24.04
+2026-09-05T18:04:03.7471871Z Version: 20260831.293.1
+2026-09-05T18:04:03.7473256Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260831.293/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-05T18:04:03.7474795Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260831.293
+2026-09-05T18:04:03.7475847Z ##[endgroup]
+2026-09-05T18:04:03.7477061Z ##[group]GITHUB_TOKEN Permissions
+2026-09-05T18:04:03.7479324Z Contents: write
+2026-09-05T18:04:03.7479952Z Issues: write
+2026-09-05T18:04:03.7480593Z Metadata: read
+2026-09-05T18:04:03.7481158Z ##[endgroup]
+2026-09-05T18:04:03.7483416Z Secret source: Actions
+2026-09-05T18:04:03.7484669Z Prepare workflow directory
+2026-09-05T18:04:03.7823514Z Prepare all required actions
+2026-09-05T18:04:03.7872277Z Getting action download info
+2026-09-05T18:04:04.1375762Z Download action repository 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09' (SHA:fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09)
+2026-09-05T18:04:04.2880120Z Download action repository 'actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1' (SHA:ece7cb06caefa5fff74198d8649806c4678c61a1)
+2026-09-05T18:04:04.4004559Z Download action repository 'actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd' (SHA:ed597411d8f924073f98dfc5c65a23a2325f34cd)
+2026-09-05T18:04:04.8522440Z Complete job name: daily-check
+2026-09-05T18:04:04.9335132Z ##[group]Run actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+2026-09-05T18:04:04.9336198Z with:
+2026-09-05T18:04:04.9336668Z   repository: ytzmzmq/financial_analysis
+2026-09-05T18:04:04.9340345Z   token: ***
+2026-09-05T18:04:04.9340979Z   ssh-strict: true
+2026-09-05T18:04:04.9341571Z   ssh-user: git
+2026-09-05T18:04:04.9342259Z   persist-credentials: true
+2026-09-05T18:04:04.9342748Z   clean: true
+2026-09-05T18:04:04.9343206Z   sparse-checkout-cone-mode: true
+2026-09-05T18:04:04.9343728Z   fetch-depth: 1
+2026-09-05T18:04:04.9344171Z   fetch-tags: false
+2026-09-05T18:04:04.9344624Z   show-progress: true
+2026-09-05T18:04:04.9345072Z   lfs: false
+2026-09-05T18:04:04.9345485Z   submodules: false
+2026-09-05T18:04:04.9345946Z   set-safe-directory: true
+2026-09-05T18:04:04.9346448Z   allow-unsafe-pr-checkout: false
+2026-09-05T18:04:04.9347269Z ##[endgroup]
+2026-09-05T18:04:05.0352858Z Syncing repository: ytzmzmq/financial_analysis
+2026-09-05T18:04:05.0355526Z ##[group]Getting Git version info
+2026-09-05T18:04:05.0356915Z Working directory is '/home/runner/work/financial_analysis/financial_analysis'
+2026-09-05T18:04:05.0358713Z [command]/usr/bin/git version
+2026-09-05T18:04:05.0437730Z git version 2.55.0
+2026-09-05T18:04:05.0460286Z ##[endgroup]
+2026-09-05T18:04:05.0475893Z Temporarily overriding HOME='/home/runner/work/_temp/15e41b0e-cb64-4a34-b951-22ebc5c82877' before making global git config changes
+2026-09-05T18:04:05.0478396Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-05T18:04:05.0481275Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/financial_analysis/financial_analysis
+2026-09-05T18:04:05.0538863Z Deleting the contents of '/home/runner/work/financial_analysis/financial_analysis'
+2026-09-05T18:04:05.0543120Z ##[group]Initializing the repository
+2026-09-05T18:04:05.0548795Z [command]/usr/bin/git init /home/runner/work/financial_analysis/financial_analysis
+2026-09-05T18:04:05.0691067Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-05T18:04:05.0693148Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-05T18:04:05.0707773Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-05T18:04:05.0709110Z hint: call:
+2026-09-05T18:04:05.0710147Z hint:
+2026-09-05T18:04:05.0711006Z hint: 	git config --global init.defaultBranch <name>
+2026-09-05T18:04:05.0712211Z hint:
+2026-09-05T18:04:05.0713137Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-05T18:04:05.0714631Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-05T18:04:05.0715829Z hint:
+2026-09-05T18:04:05.0716476Z hint: 	git branch -m <name>
+2026-09-05T18:04:05.0717230Z hint:
+2026-09-05T18:04:05.0718226Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-05T18:04:05.0720063Z Initialized empty Git repository in /home/runner/work/financial_analysis/financial_analysis/.git/
+2026-09-05T18:04:05.0733323Z [command]/usr/bin/git remote add origin https://github.com/ytzmzmq/financial_analysis
+2026-09-05T18:04:05.0781156Z ##[endgroup]
+2026-09-05T18:04:05.0782862Z ##[group]Disabling automatic garbage collection
+2026-09-05T18:04:05.0784959Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-05T18:04:05.0817662Z ##[endgroup]
+2026-09-05T18:04:05.0819048Z ##[group]Setting up auth
+2026-09-05T18:04:05.0825217Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-05T18:04:05.0861154Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-05T18:04:05.1289865Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-05T18:04:05.1326568Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-05T18:04:05.1554423Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-05T18:04:05.1592315Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-05T18:04:05.1819484Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-05T18:04:05.1860737Z ##[endgroup]
+2026-09-05T18:04:05.1861617Z ##[group]Fetching the repository
+2026-09-05T18:04:05.1873267Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +6ab8d0e8e705406ac7d5317220e898cdf35c2812:refs/remotes/origin/main
+2026-09-05T18:04:05.7652890Z From https://github.com/ytzmzmq/financial_analysis
+2026-09-05T18:04:05.7654673Z  * [new ref]         6ab8d0e8e705406ac7d5317220e898cdf35c2812 -> origin/main
+2026-09-05T18:04:05.7659258Z ##[endgroup]
+2026-09-05T18:04:05.7661296Z ##[group]Determining the checkout info
+2026-09-05T18:04:05.7664360Z ##[endgroup]
+2026-09-05T18:04:05.7667418Z [command]/usr/bin/git sparse-checkout disable
+2026-09-05T18:04:05.7724696Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-05T18:04:05.7759138Z ##[group]Checking out the ref
+2026-09-05T18:04:05.7763385Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-09-05T18:04:05.8044962Z Switched to a new branch 'main'
+2026-09-05T18:04:05.8051146Z branch 'main' set up to track 'origin/main'.
+2026-09-05T18:04:05.8060803Z ##[endgroup]
+2026-09-05T18:04:05.8167302Z [command]/usr/bin/git log -1 --format=%H
+2026-09-05T18:04:05.8169871Z 6ab8d0e8e705406ac7d5317220e898cdf35c2812
+2026-09-05T18:04:05.8708108Z ##[group]Run actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+2026-09-05T18:04:05.8711253Z with:
+2026-09-05T18:04:05.8712905Z   python-version: 3.12
+2026-09-05T18:04:05.8714486Z   check-latest: false
+2026-09-05T18:04:05.8727839Z   token: ***
+2026-09-05T18:04:05.8728768Z   update-environment: true
+2026-09-05T18:04:05.8729791Z   allow-prereleases: false
+2026-09-05T18:04:05.8730779Z   freethreaded: false
+2026-09-05T18:04:05.8731950Z ##[endgroup]
+2026-09-05T18:04:06.0089979Z ##[group]Installed versions
+2026-09-05T18:04:06.0772869Z Successfully set up CPython (3.12.14)
+2026-09-05T18:04:06.0774113Z ##[endgroup]
+2026-09-05T18:04:06.0965377Z ##[group]Run pip install -r requirements.txt
+2026-09-05T18:04:06.0966421Z [36;1mpip install -r requirements.txt[0m
+2026-09-05T18:04:06.1083873Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:04:06.1084501Z env:
+2026-09-05T18:04:06.1085057Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:06.1085796Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:04:06.1086591Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:06.1087268Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:06.1088250Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:06.1089345Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:04:06.1090302Z ##[endgroup]
+2026-09-05T18:04:09.2098614Z Collecting pandas==3.0.5 (from -r requirements.txt (line 1))
+2026-09-05T18:04:09.2566352Z   Downloading pandas-3.0.5-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+2026-09-05T18:04:09.4918678Z Collecting numpy==2.5.1 (from -r requirements.txt (line 2))
+2026-09-05T18:04:09.4960448Z   Downloading numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+2026-09-05T18:04:09.6111219Z Collecting scipy==1.18.0 (from -r requirements.txt (line 3))
+2026-09-05T18:04:09.6139742Z   Downloading scipy-1.18.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+2026-09-05T18:04:09.6562897Z Collecting akshare==1.18.83 (from -r requirements.txt (line 4))
+2026-09-05T18:04:09.6600549Z   Downloading akshare-1.18.83-py3-none-any.whl.metadata (13 kB)
+2026-09-05T18:04:09.6771166Z Collecting openpyxl==3.1.5 (from -r requirements.txt (line 5))
+2026-09-05T18:04:09.6805126Z   Downloading openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+2026-09-05T18:04:09.6932733Z Collecting python-dateutil>=2.8.2 (from pandas==3.0.5->-r requirements.txt (line 1))
+2026-09-05T18:04:09.6983241Z   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+2026-09-05T18:04:09.7155265Z Collecting beautifulsoup4>=4.9.1 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:09.7183659Z   Downloading beautifulsoup4-4.15.0-py3-none-any.whl.metadata (3.8 kB)
+2026-09-05T18:04:09.9418045Z Collecting lxml>=4.2.1 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:09.9446790Z   Downloading lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+2026-09-05T18:04:09.9665610Z Collecting requests>=2.22.0 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:09.9702054Z   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+2026-09-05T18:04:10.0435849Z Collecting curl_cffi>=0.13.0 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:10.0469194Z   Downloading curl_cffi-0.16.3-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (17 kB)
+2026-09-05T18:04:10.0625817Z Collecting html5lib>=1.0.1 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:10.0655022Z   Downloading html5lib-1.1-py2.py3-none-any.whl.metadata (16 kB)
+2026-09-05T18:04:10.0783355Z Collecting xlrd>=1.2.0 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:10.0821249Z   Downloading xlrd-2.0.2-py2.py3-none-any.whl.metadata (3.5 kB)
+2026-09-05T18:04:10.1020218Z Collecting urllib3>=1.25.8 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:10.1052998Z   Downloading urllib3-2.7.0-py3-none-any.whl.metadata (6.9 kB)
+2026-09-05T18:04:10.1310355Z Collecting tqdm>=4.43.0 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:10.1336394Z   Downloading tqdm-4.70.0-py3-none-any.whl.metadata (57 kB)
+2026-09-05T18:04:10.1488863Z Collecting jsonpath>=0.82 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:10.1525475Z   Downloading jsonpath-0.82.2.tar.gz (10 kB)
+2026-09-05T18:04:10.1681363Z   Installing build dependencies: started
+2026-09-05T18:04:11.5170112Z   Installing build dependencies: finished with status 'done'
+2026-09-05T18:04:11.5175798Z   Getting requirements to build wheel: started
+2026-09-05T18:04:11.9349643Z   Getting requirements to build wheel: finished with status 'done'
+2026-09-05T18:04:11.9359426Z   Preparing metadata (pyproject.toml): started
+2026-09-05T18:04:12.1312110Z   Preparing metadata (pyproject.toml): finished with status 'done'
+2026-09-05T18:04:12.1413791Z Collecting tabulate>=0.8.6 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.1439745Z   Downloading tabulate-0.10.0-py3-none-any.whl.metadata (40 kB)
+2026-09-05T18:04:12.1598588Z Collecting decorator>=4.4.2 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.1624846Z   Downloading decorator-5.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-09-05T18:04:12.1874186Z Collecting py-mini-racer>=0.6.0 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.1929908Z   Downloading py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl.metadata (8.7 kB)
+2026-09-05T18:04:12.2034912Z Collecting akracer>=0.0.13 (from akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.2077797Z   Downloading akracer-0.0.14-py3-none-any.whl.metadata (3.3 kB)
+2026-09-05T18:04:12.2173441Z Collecting et-xmlfile (from openpyxl==3.1.5->-r requirements.txt (line 5))
+2026-09-05T18:04:12.2203841Z   Downloading et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+2026-09-05T18:04:12.2359689Z Collecting soupsieve>=1.6.1 (from beautifulsoup4>=4.9.1->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.2389533Z   Downloading soupsieve-2.9.2-py3-none-any.whl.metadata (4.6 kB)
+2026-09-05T18:04:12.2544935Z Collecting typing-extensions>=4.0.0 (from beautifulsoup4>=4.9.1->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.2570131Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-09-05T18:04:12.3513701Z Collecting cffi>=2.0.0 (from curl_cffi>=0.13.0->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.3548344Z   Downloading cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+2026-09-05T18:04:12.3702818Z Collecting certifi>=2024.2.2 (from curl_cffi>=0.13.0->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.3730267Z   Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-09-05T18:04:12.3848923Z Collecting pycparser (from cffi>=2.0.0->curl_cffi>=0.13.0->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.3879373Z   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+2026-09-05T18:04:12.4032135Z Collecting six>=1.9 (from html5lib>=1.0.1->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.4058524Z   Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+2026-09-05T18:04:12.4152235Z Collecting webencodings (from html5lib>=1.0.1->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.4177115Z   Downloading webencodings-0.6.1-py3-none-any.whl.metadata (3.4 kB)
+2026-09-05T18:04:12.5279298Z Collecting charset_normalizer<4,>=2 (from requests>=2.22.0->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.5310003Z   Downloading charset_normalizer-3.5.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (45 kB)
+2026-09-05T18:04:12.5467026Z Collecting idna<4,>=2.5 (from requests>=2.22.0->akshare==1.18.83->-r requirements.txt (line 4))
+2026-09-05T18:04:12.5495247Z   Downloading idna-3.19-py3-none-any.whl.metadata (9.2 kB)
+2026-09-05T18:04:12.5659011Z Downloading pandas-3.0.5-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (11.0 MB)
+2026-09-05T18:04:12.6202001Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.0/11.0 MB 216.2 MB/s  0:00:00
+2026-09-05T18:04:12.6230248Z Downloading numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+2026-09-05T18:04:12.6933912Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 247.6 MB/s  0:00:00
+2026-09-05T18:04:12.6967190Z Downloading scipy-1.18.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (35.3 MB)
+2026-09-05T18:04:12.8141310Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 35.3/35.3 MB 305.9 MB/s  0:00:00
+2026-09-05T18:04:12.8404905Z Downloading akshare-1.18.83-py3-none-any.whl (1.1 MB)
+2026-09-05T18:04:12.8604605Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 67.9 MB/s  0:00:00
+2026-09-05T18:04:12.8631008Z Downloading openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+2026-09-05T18:04:12.8692117Z Downloading akracer-0.0.14-py3-none-any.whl (10.1 MB)
+2026-09-05T18:04:12.9189695Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.1/10.1 MB 207.1 MB/s  0:00:00
+2026-09-05T18:04:12.9216873Z Downloading beautifulsoup4-4.15.0-py3-none-any.whl (109 kB)
+2026-09-05T18:04:12.9271237Z Downloading curl_cffi-0.16.3-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (13.5 MB)
+2026-09-05T18:04:12.9879773Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.5/13.5 MB 244.4 MB/s  0:00:00
+2026-09-05T18:04:12.9911641Z Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-09-05T18:04:12.9961977Z Downloading cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+2026-09-05T18:04:13.0021078Z Downloading decorator-5.3.1-py3-none-any.whl (10 kB)
+2026-09-05T18:04:13.0068175Z Downloading html5lib-1.1-py2.py3-none-any.whl (112 kB)
+2026-09-05T18:04:13.0117775Z Downloading lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+2026-09-05T18:04:13.0294695Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 325.8 MB/s  0:00:00
+2026-09-05T18:04:13.0332442Z Downloading py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl (5.4 MB)
+2026-09-05T18:04:13.0566008Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.4/5.4 MB 250.2 MB/s  0:00:00
+2026-09-05T18:04:13.0600852Z Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+2026-09-05T18:04:13.0654542Z Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+2026-09-05T18:04:13.0704749Z Downloading charset_normalizer-3.5.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (248 kB)
+2026-09-05T18:04:13.0756143Z Downloading idna-3.19-py3-none-any.whl (68 kB)
+2026-09-05T18:04:13.0811328Z Downloading urllib3-2.7.0-py3-none-any.whl (131 kB)
+2026-09-05T18:04:13.0862393Z Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+2026-09-05T18:04:13.0910776Z Downloading soupsieve-2.9.2-py3-none-any.whl (37 kB)
+2026-09-05T18:04:13.0960125Z Downloading tabulate-0.10.0-py3-none-any.whl (39 kB)
+2026-09-05T18:04:13.1011143Z Downloading tqdm-4.70.0-py3-none-any.whl (80 kB)
+2026-09-05T18:04:13.1060243Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-09-05T18:04:13.1106504Z Downloading xlrd-2.0.2-py2.py3-none-any.whl (96 kB)
+2026-09-05T18:04:13.1158937Z Downloading et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+2026-09-05T18:04:13.1211309Z Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+2026-09-05T18:04:13.1260938Z Downloading webencodings-0.6.1-py3-none-any.whl (8.7 kB)
+2026-09-05T18:04:13.3204460Z Building wheels for collected packages: jsonpath
+2026-09-05T18:04:13.3213699Z   Building wheel for jsonpath (pyproject.toml): started
+2026-09-05T18:04:13.5372503Z   Building wheel for jsonpath (pyproject.toml): finished with status 'done'
+2026-09-05T18:04:13.5379185Z   Created wheel for jsonpath: filename=jsonpath-0.82.2-py3-none-any.whl size=5667 sha256=6731b99e1933aacbfe43a63ea2638a5afcfbbd214eb9cb5d493e2c7fcfe1fb1d
+2026-09-05T18:04:13.5381443Z   Stored in directory: /home/runner/.cache/pip/wheels/73/76/e2/980a29341fe37a583ada29594ed529708d5e8e2c0f9d97c3cc
+2026-09-05T18:04:13.5398451Z Successfully built jsonpath
+2026-09-05T18:04:13.6354480Z Installing collected packages: py-mini-racer, jsonpath, xlrd, webencodings, urllib3, typing-extensions, tqdm, tabulate, soupsieve, six, pycparser, numpy, lxml, idna, et-xmlfile, decorator, charset_normalizer, certifi, akracer, scipy, requests, python-dateutil, openpyxl, html5lib, cffi, beautifulsoup4, pandas, curl_cffi, akshare
+2026-09-05T18:04:27.2556307Z 
+2026-09-05T18:04:27.2587947Z Successfully installed akracer-0.0.14 akshare-1.18.83 beautifulsoup4-4.15.0 certifi-2026.7.22 cffi-2.1.1 charset_normalizer-3.5.1 curl_cffi-0.16.3 decorator-5.3.1 et-xmlfile-2.0.0 html5lib-1.1 idna-3.19 jsonpath-0.82.2 lxml-6.1.3 numpy-2.5.1 openpyxl-3.1.5 pandas-3.0.5 py-mini-racer-0.6.0 pycparser-3.0 python-dateutil-2.9.0.post0 requests-2.34.2 scipy-1.18.0 six-1.17.0 soupsieve-2.9.2 tabulate-0.10.0 tqdm-4.70.0 typing-extensions-4.16.0 urllib3-2.7.0 webencodings-0.6.1 xlrd-2.0.2
+2026-09-05T18:04:27.3731539Z ##[group]Run python -c "from src.models.rule_registry import evaluate_signal, ACTIVE_MODEL_VERSION; print(f'Version: {ACTIVE_MODEL_VERSION}')"
+2026-09-05T18:04:27.3732922Z [36;1mpython -c "from src.models.rule_registry import evaluate_signal, ACTIVE_MODEL_VERSION; print(f'Version: {ACTIVE_MODEL_VERSION}')"[0m
+2026-09-05T18:04:27.3733680Z [36;1mpython -c "from app.tracker import _compute, _load_data; print('Tracker OK')"[0m
+2026-09-05T18:04:27.3772251Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:04:27.3772507Z env:
+2026-09-05T18:04:27.3772779Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:27.3773225Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:04:27.3773660Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:27.3774041Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:27.3774430Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:27.3774870Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:04:27.3775203Z ##[endgroup]
+2026-09-05T18:04:27.8107076Z Version: V5.2
+2026-09-05T18:04:28.2201143Z Tracker OK
+2026-09-05T18:04:28.2664060Z ##[group]Run timeout 900 python app/notify.py 2>&1 | tee output.txt || true
+2026-09-05T18:04:28.2664646Z [36;1mtimeout 900 python app/notify.py 2>&1 | tee output.txt || true[0m
+2026-09-05T18:04:28.2665037Z [36;1mpython app/ci_parse.py[0m
+2026-09-05T18:04:28.2701312Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:04:28.2701564Z env:
+2026-09-05T18:04:28.2701990Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:28.2702449Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:04:28.2702899Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:28.2703303Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:28.2703708Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:04:28.2704114Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:04:28.2704634Z   PUSH_KEY: ***
+2026-09-05T18:04:28.2704836Z ##[endgroup]
+2026-09-05T18:05:29.9800919Z [2026-09-05 周六 18:04:28] 运行监控...
+2026-09-05T18:05:29.9801452Z   [ERROR] 数据拉取失败: Expecting value: line 1 column 1 (char 0)
+2026-09-05T18:05:30.0712902Z alert=silent score=0
+2026-09-05T18:05:30.0775429Z ##[group]Run cat alert_result.txt >> $GITHUB_OUTPUT
+2026-09-05T18:05:30.0775838Z [36;1mcat alert_result.txt >> $GITHUB_OUTPUT[0m
+2026-09-05T18:05:30.0812974Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:05:30.0813222Z env:
+2026-09-05T18:05:30.0813491Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0813938Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:05:30.0814399Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0814795Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0815180Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0815750Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:05:30.0816077Z ##[endgroup]
+2026-09-05T18:05:30.0948089Z ##[group]Run timeout 300 python app/dashboard.py || true
+2026-09-05T18:05:30.0948626Z [36;1mtimeout 300 python app/dashboard.py || true[0m
+2026-09-05T18:05:30.0982128Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:05:30.0982498Z env:
+2026-09-05T18:05:30.0982885Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0983440Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:05:30.0983972Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0984463Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0984985Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:05:30.0985495Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:05:30.0985951Z ##[endgroup]
+2026-09-05T18:06:32.2988069Z Traceback (most recent call last):
+2026-09-05T18:06:32.2997919Z   File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/requests/models.py", line 1116, in json
+2026-09-05T18:06:32.2998864Z 生成看板...
+2026-09-05T18:06:32.2999199Z     return complexjson.loads(self.text, **kwargs)
+2026-09-05T18:06:32.2999615Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-05T18:06:32.3000185Z   File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/json/__init__.py", line 346, in loads
+2026-09-05T18:06:32.3069685Z     return _default_decoder.decode(s)
+2026-09-05T18:06:32.3070090Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-05T18:06:32.3070664Z   File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/json/decoder.py", line 338, in decode
+2026-09-05T18:06:32.3142706Z     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+2026-09-05T18:06:32.3143531Z                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-05T18:06:32.3144930Z   File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/json/decoder.py", line 356, in raw_decode
+2026-09-05T18:06:32.3146690Z     raise JSONDecodeError("Expecting value", s, err.value) from None
+2026-09-05T18:06:32.3147988Z json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+2026-09-05T18:06:32.3148947Z 
+2026-09-05T18:06:32.3149835Z During handling of the above exception, another exception occurred:
+2026-09-05T18:06:32.3150615Z 
+2026-09-05T18:06:32.3150892Z Traceback (most recent call last):
+2026-09-05T18:06:32.3152461Z   File "/home/runner/work/financial_analysis/financial_analysis/app/dashboard.py", line 250, in <module>
+2026-09-05T18:06:32.3153799Z     build_dashboard()
+2026-09-05T18:06:32.3154989Z   File "/home/runner/work/financial_analysis/financial_analysis/app/dashboard.py", line 60, in build_dashboard
+2026-09-05T18:06:32.3156512Z     med_df = AKShareSource().fetch_sw_medical("20180101")
+2026-09-05T18:06:32.3157321Z              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-05T18:06:32.3159122Z   File "/home/runner/work/financial_analysis/financial_analysis/src/data_fetcher/akshare_source.py", line 82, in fetch_sw_medical
+2026-09-05T18:06:32.3160423Z     df = ak.index_hist_sw(symbol="801150", period="day")
+2026-09-05T18:06:32.3161014Z          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-09-05T18:06:32.3162350Z   File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/akshare/index/index_research_sw.py", line 55, in index_hist_sw
+2026-09-05T18:06:32.3163395Z     data_json = r.json()
+2026-09-05T18:06:32.3163777Z                 ^^^^^^^^
+2026-09-05T18:06:32.3164708Z   File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/requests/models.py", line 1120, in json
+2026-09-05T18:06:32.3165721Z     raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+2026-09-05T18:06:32.3172766Z requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+2026-09-05T18:06:32.4452940Z ##[group]Run pip install -r agriculture/requirements.txt
+2026-09-05T18:06:32.4453568Z [36;1mpip install -r agriculture/requirements.txt[0m
+2026-09-05T18:06:32.4454065Z [36;1mtimeout 900 python agriculture/app/tracker_agri.py 2>&1 | tee output_agri.txt || true[0m
+2026-09-05T18:06:32.4454567Z [36;1mpython agriculture/app/ci_parse_agri.py[0m
+2026-09-05T18:06:32.4490815Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:06:32.4491066Z env:
+2026-09-05T18:06:32.4491340Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:06:32.4492086Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:06:32.4492544Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:06:32.4492958Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:06:32.4493358Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:06:32.4493760Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:06:32.4494132Z ##[endgroup]
+2026-09-05T18:06:33.2618520Z Requirement already satisfied: akshare==1.18.83 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from -r agriculture/requirements.txt (line 3)) (1.18.83)
+2026-09-05T18:06:33.2624591Z Requirement already satisfied: pandas==3.0.5 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from -r agriculture/requirements.txt (line 4)) (3.0.5)
+2026-09-05T18:06:33.2630110Z Requirement already satisfied: numpy==2.5.1 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from -r agriculture/requirements.txt (line 5)) (2.5.1)
+2026-09-05T18:06:33.3808051Z Collecting scipy==1.18.1 (from -r agriculture/requirements.txt (line 6))
+2026-09-05T18:06:33.4305815Z   Downloading scipy-1.18.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+2026-09-05T18:06:33.5684668Z Collecting statsmodels==0.15.0 (from -r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:33.5738523Z   Downloading statsmodels-0.15.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.6 kB)
+2026-09-05T18:06:33.5806890Z Requirement already satisfied: openpyxl==3.1.5 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from -r agriculture/requirements.txt (line 8)) (3.1.5)
+2026-09-05T18:06:33.5819167Z Requirement already satisfied: beautifulsoup4>=4.9.1 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (4.15.0)
+2026-09-05T18:06:33.5825321Z Requirement already satisfied: lxml>=4.2.1 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (6.1.3)
+2026-09-05T18:06:33.5832249Z Requirement already satisfied: requests>=2.22.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (2.34.2)
+2026-09-05T18:06:33.5838194Z Requirement already satisfied: curl_cffi>=0.13.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (0.16.3)
+2026-09-05T18:06:33.5844275Z Requirement already satisfied: html5lib>=1.0.1 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (1.1)
+2026-09-05T18:06:33.5850026Z Requirement already satisfied: xlrd>=1.2.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (2.0.2)
+2026-09-05T18:06:33.5856014Z Requirement already satisfied: urllib3>=1.25.8 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (2.7.0)
+2026-09-05T18:06:33.5862908Z Requirement already satisfied: tqdm>=4.43.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (4.70.0)
+2026-09-05T18:06:33.5869480Z Requirement already satisfied: jsonpath>=0.82 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (0.82.2)
+2026-09-05T18:06:33.5875667Z Requirement already satisfied: tabulate>=0.8.6 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (0.10.0)
+2026-09-05T18:06:33.5881344Z Requirement already satisfied: decorator>=4.4.2 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (5.3.1)
+2026-09-05T18:06:33.5889606Z Requirement already satisfied: py-mini-racer>=0.6.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (0.6.0)
+2026-09-05T18:06:33.5896864Z Requirement already satisfied: akracer>=0.0.13 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (0.0.14)
+2026-09-05T18:06:33.5949836Z Requirement already satisfied: python-dateutil>=2.8.2 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from pandas==3.0.5->-r agriculture/requirements.txt (line 4)) (2.9.0.post0)
+2026-09-05T18:06:33.6107150Z Collecting patsy>=0.5.6 (from statsmodels==0.15.0->-r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:33.6161422Z   Downloading patsy-1.0.3-py2.py3-none-any.whl.metadata (3.7 kB)
+2026-09-05T18:06:33.6301678Z Collecting packaging>=21.3 (from statsmodels==0.15.0->-r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:33.6339075Z   Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+2026-09-05T18:06:33.6466869Z Collecting formulaic>=1.1.0 (from statsmodels==0.15.0->-r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:33.6570226Z   Downloading formulaic-1.2.2-py3-none-any.whl.metadata (7.0 kB)
+2026-09-05T18:06:33.6624651Z Requirement already satisfied: et-xmlfile in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from openpyxl==3.1.5->-r agriculture/requirements.txt (line 8)) (2.0.0)
+2026-09-05T18:06:33.6640741Z Requirement already satisfied: soupsieve>=1.6.1 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from beautifulsoup4>=4.9.1->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (2.9.2)
+2026-09-05T18:06:33.6646166Z Requirement already satisfied: typing-extensions>=4.0.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from beautifulsoup4>=4.9.1->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (4.16.0)
+2026-09-05T18:06:33.6662905Z Requirement already satisfied: cffi>=2.0.0 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from curl_cffi>=0.13.0->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (2.1.1)
+2026-09-05T18:06:33.6668036Z Requirement already satisfied: certifi>=2024.2.2 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from curl_cffi>=0.13.0->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (2026.7.22)
+2026-09-05T18:06:33.6705749Z Requirement already satisfied: pycparser in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from cffi>=2.0.0->curl_cffi>=0.13.0->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (3.0)
+2026-09-05T18:06:33.6804542Z Collecting interface-meta>=1.2.0 (from formulaic>=1.1.0->statsmodels==0.15.0->-r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:33.6849387Z   Downloading interface_meta-2.0.1-py3-none-any.whl.metadata (6.4 kB)
+2026-09-05T18:06:33.7175518Z Collecting narwhals>=1.17 (from formulaic>=1.1.0->statsmodels==0.15.0->-r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:33.7208767Z   Downloading narwhals-2.25.0-py3-none-any.whl.metadata (15 kB)
+2026-09-05T18:06:34.0149574Z Collecting wrapt>=1.0 (from formulaic>=1.1.0->statsmodels==0.15.0->-r agriculture/requirements.txt (line 7))
+2026-09-05T18:06:34.0186587Z   Downloading wrapt-2.4.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (7.4 kB)
+2026-09-05T18:06:34.0240843Z Requirement already satisfied: six>=1.9 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from html5lib>=1.0.1->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (1.17.0)
+2026-09-05T18:06:34.0245873Z Requirement already satisfied: webencodings in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from html5lib>=1.0.1->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (0.6.1)
+2026-09-05T18:06:34.0317282Z Requirement already satisfied: charset_normalizer<4,>=2 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from requests>=2.22.0->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (3.5.1)
+2026-09-05T18:06:34.0323097Z Requirement already satisfied: idna<4,>=2.5 in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (from requests>=2.22.0->akshare==1.18.83->-r agriculture/requirements.txt (line 3)) (3.19)
+2026-09-05T18:06:34.0502172Z Downloading scipy-1.18.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (35.3 MB)
+2026-09-05T18:06:34.1626935Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 35.3/35.3 MB 328.0 MB/s  0:00:00
+2026-09-05T18:06:34.1677264Z Downloading statsmodels-0.15.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (12.0 MB)
+2026-09-05T18:06:34.2676455Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 120.9 MB/s  0:00:00
+2026-09-05T18:06:34.2713683Z Downloading formulaic-1.2.2-py3-none-any.whl (118 kB)
+2026-09-05T18:06:34.2786908Z Downloading interface_meta-2.0.1-py3-none-any.whl (15 kB)
+2026-09-05T18:06:34.2852048Z Downloading narwhals-2.25.0-py3-none-any.whl (467 kB)
+2026-09-05T18:06:34.2925055Z Downloading packaging-26.3-py3-none-any.whl (129 kB)
+2026-09-05T18:06:34.2979049Z Downloading patsy-1.0.3-py2.py3-none-any.whl (233 kB)
+2026-09-05T18:06:34.3035078Z Downloading wrapt-2.4.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (227 kB)
+2026-09-05T18:06:34.4558125Z Installing collected packages: wrapt, scipy, packaging, narwhals, interface-meta, patsy, formulaic, statsmodels
+2026-09-05T18:06:34.4882700Z   Attempting uninstall: scipy
+2026-09-05T18:06:34.4926571Z     Found existing installation: scipy 1.18.0
+2026-09-05T18:06:34.5781929Z     Uninstalling scipy-1.18.0:
+2026-09-05T18:06:34.5915527Z       Successfully uninstalled scipy-1.18.0
+2026-09-05T18:06:42.2859252Z 
+2026-09-05T18:06:42.2892745Z Successfully installed formulaic-1.2.2 interface-meta-2.0.1 narwhals-2.25.0 packaging-26.3 patsy-1.0.3 scipy-1.18.1 statsmodels-0.15.0 wrapt-2.4.0
+2026-09-05T18:07:56.7575553Z 
+2026-09-05T18:07:57.1595300Z   0%|          | 0/19 [00:00<?, ?it/s]
+2026-09-05T18:07:57.5277273Z   5%|▌         | 1/19 [00:00<00:07,  2.49it/s]
+2026-09-05T18:07:57.8882806Z  11%|█         | 2/19 [00:00<00:06,  2.62it/s]
+2026-09-05T18:07:58.2433134Z  16%|█▌        | 3/19 [00:01<00:05,  2.69it/s]
+2026-09-05T18:07:58.7147396Z  21%|██        | 4/19 [00:01<00:05,  2.74it/s]
+2026-09-05T18:07:59.0964285Z  26%|██▋       | 5/19 [00:01<00:05,  2.48it/s]
+2026-09-05T18:07:59.6929274Z  32%|███▏      | 6/19 [00:02<00:05,  2.52it/s]
+2026-09-05T18:07:59.9932116Z  37%|███▋      | 7/19 [00:02<00:05,  2.17it/s]
+2026-09-05T18:08:00.4777597Z  42%|████▏     | 8/19 [00:03<00:04,  2.44it/s]
+2026-09-05T18:08:01.0684927Z  47%|████▋     | 9/19 [00:03<00:04,  2.31it/s]
+2026-09-05T18:08:01.3466226Z  53%|█████▎    | 10/19 [00:04<00:04,  2.07it/s]
+2026-09-05T18:08:01.6974619Z  58%|█████▊    | 11/19 [00:04<00:03,  2.38it/s]
+2026-09-05T18:08:02.6524870Z  63%|██████▎   | 12/19 [00:04<00:02,  2.51it/s]
+2026-09-05T18:08:03.5203743Z  68%|██████▊   | 13/19 [00:05<00:03,  1.76it/s]
+2026-09-05T18:08:04.0289493Z  74%|███████▎  | 14/19 [00:06<00:03,  1.52it/s]
+2026-09-05T18:08:04.4256814Z  79%|███████▉  | 15/19 [00:07<00:02,  1.63it/s]
+2026-09-05T18:08:04.7093948Z  84%|████████▍ | 16/19 [00:07<00:01,  1.83it/s]
+2026-09-05T18:08:05.0103376Z  89%|████████▉ | 17/19 [00:07<00:00,  2.13it/s]
+2026-09-05T18:08:05.5361041Z  95%|█████████▍| 18/19 [00:08<00:00,  2.39it/s]
+2026-09-05T18:08:06.2772090Z                                                
+2026-09-05T18:08:06.2772969Z [YELLOW] Score: 57 | 农业 V1.2 2026-09-02
+2026-09-05T18:08:06.2773672Z 价格 2605 | 周期 扩张(-0.06) | 猪周期 扩张 | 收缩概率 86%
+2026-09-05T18:08:06.2774204Z 持仓 是（已 63 天） | 今日建议: 持有
+2026-09-05T18:08:06.2774715Z 连跌 1 天 | P(明日涨|k)=0.511 | 恐慌分 57（买入加速线 80）
+2026-09-05T18:08:06.2776885Z L-B2 参考卡: vol_high:高(P涨51%,20日中位+0.6%) | amount_high:高(P涨51%,20日中位-0.1%) | resid_solo:高(P涨49%,20日中位+0.1%) | market_bull:低(P涨51%,20日中位-1.2%) | sentiment_high:低(P涨51%,20日中位+0.5%) | val_low:高(P涨52%,20日中位-0.6%) | hog_phase:扩张(P涨55%,20日中位+1.2%) | cycle_phase:扩张(P涨52%,20日中位+0.6%)
+2026-09-05T18:08:06.2778102Z 警报级别: YELLOW
+2026-09-05T18:08:06.4566336Z agri alert=yellow score=57 summary=持有 | 持仓是 | 周期扩张 | 猪扩张 | 恐慌57 | 连跌1天
+2026-09-05T18:08:06.4627007Z ##[group]Run cat alert_result_agri.txt >> $GITHUB_OUTPUT
+2026-09-05T18:08:06.4627501Z [36;1mcat alert_result_agri.txt >> $GITHUB_OUTPUT[0m
+2026-09-05T18:08:06.4663239Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:08:06.4663649Z env:
+2026-09-05T18:08:06.4664037Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4664612Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:08:06.4665177Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4665697Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4666197Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4666692Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:08:06.4667132Z ##[endgroup]
+2026-09-05T18:08:06.4775583Z ##[group]Run python agriculture/app/notify_agri.py
+2026-09-05T18:08:06.4775985Z [36;1mpython agriculture/app/notify_agri.py[0m
+2026-09-05T18:08:06.4810322Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:08:06.4810569Z env:
+2026-09-05T18:08:06.4810838Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4811409Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:08:06.4811998Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4812556Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4812938Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:06.4813323Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:08:06.4813803Z   PUSH_KEY: ***
+2026-09-05T18:08:06.4814012Z   PUSHDEER_KEY: 
+2026-09-05T18:08:06.4814210Z ##[endgroup]
+2026-09-05T18:08:08.5622188Z [notify-agri] ServerChan: sent
+2026-09-05T18:08:08.5747180Z ##[group]Run timeout 300 python agriculture/app/dashboard_agri.py || true
+2026-09-05T18:08:08.5747799Z [36;1mtimeout 300 python agriculture/app/dashboard_agri.py || true[0m
+2026-09-05T18:08:08.5783884Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:08:08.5784249Z env:
+2026-09-05T18:08:08.5784639Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.5785207Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:08:08.5785942Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.5786452Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.5786947Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.5787447Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:08:08.5787894Z ##[endgroup]
+2026-09-05T18:08:08.6176018Z [dashboard] 已生成 /home/runner/work/financial_analysis/financial_analysis/dashboard_agri.html
+2026-09-05T18:08:08.6279008Z ##[group]Run git config user.name "bot"
+2026-09-05T18:08:08.6279358Z [36;1mgit config user.name "bot"[0m
+2026-09-05T18:08:08.6279693Z [36;1mgit config user.email "bot@users.noreply.github.com"[0m
+2026-09-05T18:08:08.6280070Z [36;1m# -f 必需：这些路径在 .gitignore 中，普通 add 会静默跳过[0m
+2026-09-05T18:08:08.6280705Z [36;1mgit add -f dashboard.html data/processed/signals.db dashboard_agri.html agriculture/data/processed/signals.db 2>/dev/null || true[0m
+2026-09-05T18:08:08.6281368Z [36;1m# 农业数据缓存一并入库：Actions 无本地缓存，单数据源故障时可回退到昨日缓存[0m
+2026-09-05T18:08:08.6282080Z [36;1mgit add -f agriculture/data/raw/cache/*.csv 2>/dev/null || true[0m
+2026-09-05T18:08:08.6282842Z [36;1mgit diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) 医药:silent 农业:yellow（持有 | 持仓是 | 周期扩张 | 猪扩张 | 恐慌57 | 连跌1天）" && git push || true)[0m
+2026-09-05T18:08:08.6319130Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:08:08.6319383Z env:
+2026-09-05T18:08:08.6319691Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.6320131Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:08:08.6320573Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.6320962Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.6321350Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:08.6321979Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:08:08.6322325Z ##[endgroup]
+2026-09-05T18:08:08.6897273Z [main a9a54f8] [auto] 2026-09-05 医药:silent 农业:yellow（持有 | 持仓是 | 周期扩张 | 猪扩张 | 恐慌57 | 连跌1天）
+2026-09-05T18:08:08.6897934Z  3 files changed, 1 insertion(+), 1 deletion(-)
+2026-09-05T18:08:10.0047529Z To https://github.com/ytzmzmq/financial_analysis
+2026-09-05T18:08:10.0048191Z    6ab8d0e..a9a54f8  main -> main
+2026-09-05T18:08:10.0177608Z ##[group]Run actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+2026-09-05T18:08:10.0178008Z with:
+2026-09-05T18:08:10.0182477Z   script: const fs = require('fs');
+const out = fs.existsSync('output_agri.txt') ? fs.readFileSync('output_agri.txt','utf8').slice(0,4000) : '';
+const label = 'agri-daily';
+const list = await github.rest.issues.listForRepo({
+  owner: context.repo.owner, repo: context.repo.repo,
+  state: 'open', labels: label, per_page: 1
+});
+const body = '## ' + new Date().toISOString().split('T')[0] + '（' + 'yellow'.toUpperCase() + '）\n\n```\n' + out + '\n```\n看板：dashboard_agri.html ｜ 报告：agriculture/REPORT.md';
+let issueNumber;
+if (list.data.length > 0) {
+  issueNumber = list.data[0].number;
+  await github.rest.issues.createComment({
+    owner: context.repo.owner, repo: context.repo.repo,
+    issue_number: issueNumber, body: body
+  });
+} else {
+  const created = await github.rest.issues.create({
+    owner: context.repo.owner, repo: context.repo.repo,
+    title: '农业板块每日信号（滚动日报，YELLOW/RED 更新）',
+    body: body, labels: [label]
+  });
+  issueNumber = created.data.number;
+}
+// RED 时再单独开一条警报 issue（保留医药 ARMED 的对称语义）
+if ('yellow' === 'red') {
+  await github.rest.issues.create({
+    owner: context.repo.owner, repo: context.repo.repo,
+    title: `农业信号! Score=57 (${new Date().toISOString().split('T')[0]})`,
+    body: '```\n' + out + '\n```\n\nV1.2 周期主导：cycle_score 迟滞门 + 恐慌加速',
+    labels: ['agri-alert','alert']
+  });
+}
+
+2026-09-05T18:08:10.0188931Z   github-token: ***
+2026-09-05T18:08:10.0189156Z   debug: false
+2026-09-05T18:08:10.0189372Z   user-agent: actions/github-script
+2026-09-05T18:08:10.0189847Z   result-encoding: json
+2026-09-05T18:08:10.0190067Z   retries: 0
+2026-09-05T18:08:10.0190296Z   retry-exempt-status-codes: 400,401,403,404,422
+2026-09-05T18:08:10.0190579Z env:
+2026-09-05T18:08:10.0190832Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.0191257Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:08:10.0191916Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.0192322Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.0192702Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.0193083Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:08:10.0193399Z ##[endgroup]
+2026-09-05T18:08:10.9123587Z ##[group]Run git config user.name "bot"
+2026-09-05T18:08:10.9123971Z [36;1mgit config user.name "bot"[0m
+2026-09-05T18:08:10.9124350Z [36;1mgit config user.email "bot@users.noreply.github.com"[0m
+2026-09-05T18:08:10.9124758Z [36;1mmkdir -p pages_tmp[0m
+2026-09-05T18:08:10.9125024Z [36;1mcd pages_tmp[0m
+2026-09-05T18:08:10.9125256Z [36;1mgit init -q -b gh-pages[0m
+2026-09-05T18:08:10.9128176Z [36;1mgit remote add origin "***github.com/ytzmzmq/financial_analysis.git"[0m
+2026-09-05T18:08:10.9128682Z [36;1mcp ../dashboard.html ../dashboard_agri.html . 2>/dev/null || true[0m
+2026-09-05T18:08:10.9129244Z [36;1mprintf '%s\n' '<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><title>板块监控看板</title>' \[0m
+2026-09-05T18:08:10.9129970Z [36;1m  '<style>body{font-family:system-ui,"Microsoft YaHei";max-width:640px;margin:40px auto;padding:0 16px}' \[0m
+2026-09-05T18:08:10.9130847Z [36;1m  'a{display:block;margin:12px 0;padding:16px;border:1px solid #ddd;border-radius:10px;text-decoration:none;color:#2c3e50;font-size:18px}' \[0m
+2026-09-05T18:08:10.9131524Z [36;1m  'a:hover{background:#f4f6f8}</style></head><body>' \[0m
+2026-09-05T18:08:10.9132185Z [36;1m  '<h2>板块监控看板</h2>' \[0m
+2026-09-05T18:08:10.9132493Z [36;1m  '<a href="dashboard_agri.html">农业板块周期监控</a>' \[0m
+2026-09-05T18:08:10.9132853Z [36;1m  '<a href="dashboard.html">医药板块风险收益监控</a>' \[0m
+2026-09-05T18:08:10.9133249Z [36;1m  '<p style="color:#888;font-size:13px">每日 14:45（北京时间，工作日）自动更新</p>' \[0m
+2026-09-05T18:08:10.9133627Z [36;1m  '</body></html>' > index.html[0m
+2026-09-05T18:08:10.9133895Z [36;1mgit add -A[0m
+2026-09-05T18:08:10.9134240Z [36;1mgit diff --staged --quiet || git commit -q -m "pages: $(date +%Y-%m-%d)"[0m
+2026-09-05T18:08:10.9134832Z [36;1mgit push -q -u origin gh-pages || git push -q -f origin gh-pages || echo "pages push skipped"[0m
+2026-09-05T18:08:10.9170940Z shell: /usr/bin/bash -e {0}
+2026-09-05T18:08:10.9171186Z env:
+2026-09-05T18:08:10.9171466Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.9172170Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+2026-09-05T18:08:10.9172626Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.9173028Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.9173417Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+2026-09-05T18:08:10.9173799Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+2026-09-05T18:08:10.9174122Z ##[endgroup]
+2026-09-05T18:08:10.9462287Z Author identity unknown
+2026-09-05T18:08:10.9462675Z 
+2026-09-05T18:08:10.9462880Z *** Please tell me who you are.
+2026-09-05T18:08:10.9463223Z 
+2026-09-05T18:08:10.9463373Z Run
+2026-09-05T18:08:10.9463575Z 
+2026-09-05T18:08:10.9463841Z   git config --global user.email "you@example.com"
+2026-09-05T18:08:10.9464517Z   git config --global user.name "Your Name"
+2026-09-05T18:08:10.9464915Z 
+2026-09-05T18:08:10.9465126Z to set your account's default identity.
+2026-09-05T18:08:10.9465960Z Omit --global to set the identity only in this repository.
+2026-09-05T18:08:10.9466368Z 
+2026-09-05T18:08:10.9467047Z fatal: empty ident name (for <runner@runnervmejwal.k3n05h5uyc5uxasngvwdx5yn2d.dx.internal.cloudapp.net>) not allowed
+2026-09-05T18:08:10.9482802Z ##[error]Process completed with exit code 128.
+2026-09-05T18:08:10.9596544Z Post job cleanup.
+2026-09-05T18:08:11.0460727Z [command]/usr/bin/git version
+2026-09-05T18:08:11.0506526Z git version 2.55.0
+2026-09-05T18:08:11.0544093Z Temporarily overriding HOME='/home/runner/work/_temp/ae60c15e-cdf7-4b3c-80a8-058c7d774986' before making global git config changes
+2026-09-05T18:08:11.0545868Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-05T18:08:11.0552798Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/financial_analysis/financial_analysis
+2026-09-05T18:08:11.0592629Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-05T18:08:11.0628612Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-05T18:08:11.0894540Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-05T18:08:11.0925346Z http.https://github.com/.extraheader
+2026-09-05T18:08:11.0938187Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-09-05T18:08:11.0974274Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-05T18:08:11.1242730Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-05T18:08:11.1284392Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-05T18:08:11.1702852Z Cleaning up orphan processes
