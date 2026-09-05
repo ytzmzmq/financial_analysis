@@ -59,6 +59,12 @@ jobs:
         id: agri_parsed
         run: cat alert_result_agri.txt >> $GITHUB_OUTPUT
 
+      - name: Agri WeChat push
+        env:
+          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+          PUSHDEER_KEY: ${{ secrets.PUSHDEER_KEY }}
+        run: python agriculture/app/notify_agri.py
+
       - name: Generate agri dashboard
         timeout-minutes: 5
         run: timeout 300 python agriculture/app/dashboard_agri.py || true
@@ -73,6 +79,31 @@ jobs:
           # 农业数据缓存一并入库：Actions 无本地缓存，单数据源故障时可回退到昨日缓存
           git add -f agriculture/data/raw/cache/*.csv 2>/dev/null || true
           git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) 医药:${{ steps.parsed.outputs.alert }} 农业:${{ steps.agri_parsed.outputs.alert }}（${{ steps.agri_parsed.outputs.summary }}）" && git push || true)
+
+      - name: Deploy dashboards to GitHub Pages
+        timeout-minutes: 3
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          mkdir -p pages_tmp
+          cd pages_tmp
+          git init -q -b gh-pages
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          cp ../dashboard.html ../dashboard_agri.html . 2>/dev/null || true
+          cat > index.html <<'EOT'
+          <!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><title>板块监控看板</title>
+          <style>body{font-family:system-ui,"Microsoft YaHei";max-width:640px;margin:40px auto;padding:0 16px}
+          a{display:block;margin:12px 0;padding:16px;border:1px solid #ddd;border-radius:10px;text-decoration:none;color:#2c3e50;font-size:18px}
+          a:hover{background:#f4f6f8}</style></head><body>
+          <h2>板块监控看板</h2>
+          <a href="dashboard_agri.html">🌾 农业板块周期监控</a>
+          <a href="dashboard.html">💊 医药板块风险收益监控</a>
+          <p style="color:#888;font-size:13px">每日 14:45（北京时间，工作日）自动更新</p>
+          </body></html>
+          EOT
+          git add -A
+          git diff --staged --quiet || git commit -q -m "pages: $(date +%Y-%m-%d)"
+          git push -q -f origin gh-pages 2>/dev/null || (git push -q -u origin gh-pages) || echo "pages push skipped"
 
       - name: Issue (RED)
         if: steps.parsed.outputs.alert == 'red'
