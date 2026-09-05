@@ -180,6 +180,36 @@ def fetch_rate_10y() -> pd.DataFrame:
     return _to_date_index(df)[["rate_10y"]].dropna()
 
 
+ONI_URL = "https://psl.noaa.gov/data/correlation/oni.data"
+
+
+def fetch_oni() -> pd.DataFrame:
+    """NOAA ONI（海洋尼诺指数，3 个月滑动 SST 距平）。
+
+    oni.data 为文本矩阵：行=年份，列=12 个季节（JFM..DJF），缺失记 -99.9。
+    季节 j 覆盖第 j+1~j+3 月；保守可得日 = 季节末月的次月 15 日（与宏观同规则，防前视）。
+    返回 date（可得日）, value。
+    """
+    import urllib.request
+    raw = urllib.request.urlopen(ONI_URL, timeout=60).read().decode("ascii", errors="replace")
+    rows = []
+    for line in raw.splitlines():
+        parts = line.split()
+        if not parts or not parts[0].isdigit() or len(parts) < 13:
+            continue
+        year = int(parts[0])
+        for j, v in enumerate(parts[1:13]):
+            if v in ("-99.9", "-99.99", ""):
+                continue
+            end_month = j + 3
+            y2 = year + (1 if end_month > 12 else 0)
+            m2 = end_month - 12 if end_month > 12 else end_month
+            avail = pd.Timestamp(year=y2, month=m2, day=1) + pd.Timedelta(days=14)
+            rows.append((avail, float(v)))
+    df = pd.DataFrame(rows, columns=["date", "value"]).set_index("date").sort_index()
+    return df[~df.index.duplicated(keep="last")]
+
+
 # ── 汇总装配 ────────────────────────────────────────────────
 
 def load_core_data(use_cache_days: int | None = None) -> dict[str, pd.DataFrame]:
@@ -207,7 +237,9 @@ def load_core_data(use_cache_days: int | None = None) -> dict[str, pd.DataFrame]
         "macro": _fetch("macro_daily", fetch_macro, use_cache_days),
         "margin": _fetch("margin_sh", fetch_margin_sh, use_cache_days),
         "rate": _fetch("rate_10y", fetch_rate_10y, use_cache_days),
+        "oni": _fetch("oni", fetch_oni, use_cache_days),
     }
+
 
 
 def _ffill_to_calendar(src: pd.Series, calendar: pd.DatetimeIndex) -> pd.Series:
@@ -249,4 +281,5 @@ def align_daily(data: dict[str, pd.DataFrame], calendar: pd.DatetimeIndex) -> pd
         out[col] = ff(data["macro"][col])
     out["margin_balance"] = ff(data["margin"]["margin_balance"])
     out["rate_10y"] = ff(data["rate"]["rate_10y"])
+    out["oni"] = ff(data["oni"]["value"])
     return out

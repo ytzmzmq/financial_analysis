@@ -62,6 +62,37 @@ def build_chart(history: list) -> str:
             f'<text x="14" y="16" font-size="11" fill="#888">{labels}（绿色底=持仓区间）</text></svg>')
 
 
+def build_nav_chart(nav_history: list) -> str:
+    """策略 vs 指数累计净值（近 600 个交易日，归一=1）。"""
+    if not nav_history:
+        return "<p>暂无净值数据</p>"
+    strat = [h[1] for h in nav_history]
+    idx = [h[2] for h in nav_history]
+    lo = min(min(strat), min(idx)) * 0.97
+    hi = max(max(strat), max(idx)) * 1.03
+    w, hgt = 860, 220
+    n = len(nav_history)
+    xs = [12 + i * (w - 24) / max(n - 1, 1) for i in range(n)]
+
+    def line(vals: list, color: str) -> str:
+        ys = [hgt - 18 - (v - lo) / max(hi - lo, 1e-9) * (hgt - 36) for v in vals]
+        pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+        return f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.8"/>'
+
+    end_s, end_i = strat[-1], idx[-1]
+    labels = (f'{nav_history[0][0]} → {nav_history[-1][0]}｜'
+              f'策略 {end_s:.3f}（{end_s - 1:+.1%}） vs 指数 {end_i:.3f}（{end_i - 1:+.1%}）')
+    return (f'<svg viewBox="0 0 {w} {hgt}" style="width:100%;background:#fafafa;'
+            f'border:1px solid #eee;border-radius:8px">'
+            f'<line x1="12" y1="{hgt - 18 - (1 - lo) / max(hi - lo, 1e-9) * (hgt - 36):.1f}" '
+            f'x2="{w - 12}" y2="{hgt - 18 - (1 - lo) / max(hi - lo, 1e-9) * (hgt - 36):.1f}" '
+            f'stroke="#bbb" stroke-dasharray="4,3"/>'
+            f'{line(idx, "#95a5a6")}{line(strat, "#c0392b")}'
+            f'<text x="14" y="16" font-size="11" fill="#888">{labels}</text>'
+            f'<text x="{w - 150}" y="16" font-size="11" fill="#c0392b">— 策略</text>'
+            f'<text x="{w - 80}" y="16" font-size="11" fill="#95a5a6">— 指数</text></svg>')
+
+
 def table_html(df_records: list, cols: list, headers: list) -> str:
     head = "".join(f"<th>{h}</th>" for h in headers)
     body = ""
@@ -139,6 +170,10 @@ ul{{font-size:13px;line-height:1.8}} .warn{{background:#fff8e1;border-left:4px s
 
 <h2>近 600 个交易日</h2>
 {build_chart(state.get('history', []))}
+
+<h2>策略 vs 指数 · 累计净值（近 600 个交易日，含费用与 7 天约束）</h2>
+{build_nav_chart(state.get('nav_history', []))}
+<p class="note">策略净值含申购 0.15%/赎回 0.5% 费用与 T+1 执行；虚线为归一基准 1.0。曲线展示的是历史回放（冻结模型对全历史的回溯），非实盘承诺。</p>
 
 <h2>连跌频率（训练段 2005-2021 冻结）</h2>
 {table_html(freq, ['n', 'episodes_per_year', 'p_continue'], ['连跌≥n 天', '年均发生次数', '继续下跌概率'])}

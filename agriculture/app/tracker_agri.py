@@ -163,10 +163,19 @@ def main() -> int:
     hist = bt["state"][["position"]].join(daily["close"]).iloc[-600:]
     history = [[str(d.date()), round(float(c), 1), int(p)]
                for d, c, p in hist.itertuples(index=True, name=None)]
+    # 策略 vs 指数累计净值（近 600 个交易日，按窗口起点归一=1，含费用与 7 天约束）
+    nav = pd.DataFrame({
+        "strat": (1 + bt["state"]["strat_ret"].fillna(0)).cumprod(),
+        "index": (1 + bt["state"]["index_ret"].fillna(0)).cumprod(),
+    }).iloc[-600:]
+    nav = nav / nav.iloc[0]
+    nav_history = [[str(d.date()), round(float(a), 4), round(float(b), 4)]
+                   for d, a, b in nav.itertuples(index=True, name=None)]
     state_path = AGRI / "data" / "processed" / "latest_state.json"
     state_path.write_text(json.dumps(
         {"date": str(today.date()), "alert": alert, "snapshot": snapshot,
          "model_version": cfg["version"], "history": history,
+         "nav_history": nav_history,
          "generated_at": datetime.now().isoformat(timespec="seconds")},
         ensure_ascii=False, indent=2), encoding="utf-8")
     return 0

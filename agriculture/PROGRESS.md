@@ -148,3 +148,34 @@ agriculture/
 - 缺口与替代：东财指数接口被代理拦截（改新浪源）；农林牧渔 PE/PB 历史不可得（估值维度改用价格 5 年分位）。
 - 详见 `data/raw/data_probe_20260902.md` 与 `logs/research_log.md` [R-14]；报错处理见 `logs/error_log.md` #3–#6。
 - 下一步（M1）：编写 `src/data_fetcher/akshare_source.py`，落地防前视对齐与本地缓存。
+
+
+---
+
+## 第 6 章：中期待做项落地（2026-09-05）
+
+### 步骤 6.1 NOAA ONI（ENSO）数据接入 ✅
+
+- `fetch_oni()`：解析 psl.noaa.gov 的 oni.data 文本矩阵（1950 起，12 季节列，缺失 -99.9）；
+- 防前视对齐：季节值在其末月的次月 15 日才可用（与宏观同规则）；缓存入库供 Actions 兜底。
+
+### 步骤 6.2 新候选因子三漏斗筛查 ✅（不动冻结配置）
+
+- 新增因子定义：`enso_nino`/`enso_nina`（ONI ±0.5 阈值二值）、`hog_corn_ratio`（猪粮比代理）；
+- 三漏斗逻辑抽公共模块 `src/models/factor_screen.py`（校准与周期筛查共用）；
+- 筛查结果（`data/processed/factor_screen_update.md`）：
+  - `enso_nino`：t=+5.47 但前后半不一致 → FAIL（效应集中部分年代）；
+  - `enso_nina`：预注册方向下 t=−4.67 且前后半一致 → **反向信号强**（拉尼娜活跃期农业股更差）；
+    按纪律不事后翻向，记为 **V1.3 版本评审候选（方向 −1 重新预注册）**；
+  - `hog_corn_ratio`：样本 1695<2500（生猪指数 2015 起）→ SKIP，待训练窗延展重评；
+  - 全体因子入选名单不变（halloween/skew_13w/vol_pctile_20d/meal_mom_60d/mom_120d），**V1.2 冻结配置与测试段未受影响**。
+
+### 步骤 6.3 看板净值对比曲线 ✅
+
+- tracker 输出 `nav_history`（近 600 交易日，窗口起点归一=1，含费用与 7 天约束）；
+- 看板新增"策略 vs 指数 · 累计净值"SVG 图（灰=指数，红=策略，虚线=1.0 基准）；
+- 当前读数：近 600 日策略 **+27.3%** vs 指数 **+0.9%**。
+
+### 自检
+
+- selfcheck 全部通过（新增因子未破坏防前视与执行约束断言）。

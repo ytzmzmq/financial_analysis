@@ -48,6 +48,11 @@ FACTOR_DEFS: dict[str, tuple[int, str]] = {
     "halloween":     (+1, "Halloween：11-4 月为 1（Bouman-Jacobsen 2002）"),
     # 大盘环境
     "hs300_ma200":   (+1, "沪深300 在 200 日均线上（1/0）"),
+    # 气候/外生（Atems 等 2020：ENSO 对农业股有非对称影响）
+    "enso_nino":     (+1, "厄尔尼诺活跃（ONI≥+0.5，农产品涨价预期）"),
+    "enso_nina":     (+1, "拉尼娜活跃（ONI≤−0.5，全球减产预期）"),
+    # 生猪产业链（蛛网逻辑：猪粮比低=深亏=周期谷）
+    "hog_corn_ratio": (-1, "猪粮比代理（生猪指数/玉米期货，越低越接近周期谷）"),
 }
 
 
@@ -111,6 +116,14 @@ def compute_factors(daily: pd.DataFrame) -> pd.DataFrame:
     f["halloween"] = daily.index.month.isin([11, 12, 1, 2, 3, 4]).astype(float)
     hs = daily["hs300_close"]
     f["hs300_ma200"] = (hs > hs.rolling(200).mean()).astype(float).where(hs.notna())
+
+    # 气候/外生（NOAA ONI，按可得日对齐）
+    oni = daily["oni"]
+    f["enso_nino"] = (oni >= 0.5).astype(float).where(oni.notna())
+    f["enso_nina"] = (oni <= -0.5).astype(float).where(oni.notna())
+
+    # 生猪产业链（猪粮比代理；2015 起有生猪指数，样本量由漏斗1把关）
+    f["hog_corn_ratio"] = daily["hog_week"] / daily["corn_close"]
 
     # 方向统一：值越大越看多
     for name, (direction, _) in FACTOR_DEFS.items():

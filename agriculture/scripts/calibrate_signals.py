@@ -40,7 +40,8 @@ from src.backtest.backtester import (  # noqa: E402
     compute_metrics, desired_position_v12, position_signals, run_backtest,
 )
 from src.data_fetcher.akshare_source import load_core_data  # noqa: E402
-from src.models.factor_library import FACTOR_DEFS, composite_score  # noqa: E402
+from src.models.factor_library import composite_score  # noqa: E402
+from src.models.factor_screen import screen_factors  # noqa: E402
 from src.models.pipeline import build_features  # noqa: E402
 from src.models.streak_stats import build_all_tables  # noqa: E402
 
@@ -57,57 +58,6 @@ report: list[str] = []
 def log(msg: str = "") -> None:
     print(msg)
     report.append(msg + "\n")
-
-
-def screen_factors(factors: pd.DataFrame, fwd20: pd.Series,
-                   train: tuple[pd.Timestamp, pd.Timestamp]) -> list[str]:
-    """三漏斗筛选（完整训练段 2005-2021）。"""
-    tr = factors.loc[(factors.index >= train[0]) & (factors.index <= train[1])]
-    f20 = fwd20.reindex(tr.index)
-    half = tr.index[len(tr) // 2]
-    years = tr.index.year
-    selected: list[str] = []
-    log("\n## 因子三漏斗筛选（完整训练段 2005-2021）\n")
-    log("| 因子 | 方向 | t值 | n_top | 前后半一致 | 最大单年占比 | 结果 |")
-    log("|---|---|---|---|---|---|---|")
-    rows = []
-    for name, (direction, desc) in FACTOR_DEFS.items():
-        s = tr[name]
-        valid = s.notna() & f20.notna()
-        if valid.sum() < 2500:
-            continue
-        q_hi = s.rolling(1250, min_periods=500).rank(pct=True)
-        top, bot = valid & (q_hi >= 2 / 3), valid & (q_hi <= 1 / 3)
-        n_top = int(top.sum())
-        if n_top < 300:
-            continue
-        t_stat, _ = stats.ttest_ind(f20[top], f20[bot], equal_var=False)
-        spread = float(f20[top].mean() - f20[bot].mean())
-        h1 = f20[top & (tr.index <= half)].mean() - f20[bot & (tr.index <= half)].mean()
-        h2 = f20[top & (tr.index > half)].mean() - f20[bot & (tr.index > half)].mean()
-        consistent = bool(np.sign(h1) == np.sign(h2) == np.sign(spread)) if np.isfinite(h1) and np.isfinite(h2) else False
-        yearly_share = (top.groupby(years).sum() / max(n_top, 1))
-        max_share = float(yearly_share.max())
-        passed = bool(t_stat >= 3.0 and consistent and max_share <= 0.40 and spread > 0)
-        rows.append((name, direction, t_stat, n_top, consistent, max_share, passed, s))
-        log(f"| {name} | {direction:+d} | {t_stat:.2f} | {n_top} | {consistent} | {max_share:.2f} | "
-            f"{'PASS' if passed else 'FAIL'} |")
-    rows.sort(key=lambda r: -r[2])
-    for name, direction, t_stat, n_top, consistent, max_share, passed, s in rows:
-        if not passed:
-            continue
-        ok = True
-        for sel_name in selected:
-            a, b = s.align(tr[sel_name], join="inner")
-            rho = a.corr(b, method="spearman")
-            if pd.notna(rho) and abs(rho) > 0.7:
-                ok = False
-                log(f"\n> 剔除 `{name}`：与 `{sel_name}` Spearman ρ={rho:.2f} > 0.7")
-                break
-        if ok:
-            selected.append(name)
-    log(f"\n**入选因子（{len(selected)}）**：{selected}\n")
-    return selected
 
 
 def main() -> None:
@@ -135,7 +85,7 @@ def main() -> None:
     log(tables["markov"].to_string())
 
     # ── 3. 因子筛选 ──
-    selected = screen_factors(factors, fwd20, TRAIN_FULL)
+    selected = screen_factors(factors, fwd20, TRAIN_FULL, log=log)
     panic_factors = [f for f in ["skew_13w", "vol_pctile_20d"] if f in selected]
     if not panic_factors:
         panic_factors = ["skew_13w", "vol_pctile_20d"]  # 文献预注册兜底
