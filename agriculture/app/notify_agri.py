@@ -76,7 +76,8 @@ def main() -> int:
         print(f"[notify-agri] PushDeer: {'sent' if sent else 'failed'}")
     if not key and not deer:
         print("[notify-agri] 未配置 PUSH_KEY/PUSHDEER_KEY，跳过推送")
-    return 0 if sent or (not key and not deer) else 1
+    # 推送失败不阻断流水线（Server酱免费额度 5 条/天可能耗尽，次日自动恢复）
+    return 0
 
 
 if __name__ == "__main__":

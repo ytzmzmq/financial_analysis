@@ -63,7 +63,7 @@ jobs:
         env:
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
           PUSHDEER_KEY: ${{ secrets.PUSHDEER_KEY }}
-        run: python agriculture/app/notify_agri.py
+        run: python agriculture/app/notify_agri.py || true
 
       - name: Generate agri dashboard
         timeout-minutes: 5
