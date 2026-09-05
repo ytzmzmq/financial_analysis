@@ -192,7 +192,15 @@ agriculture/
   （Server酱免费额度 5 条/天，医药+农业同推时可能耗尽，次日自动恢复）；
 - 实测：Server酱当日额度耗尽返回失败（日志可见），明天定时运行自动恢复推送。
 
-### 步骤 7.2 GitHub Pages 看板直达 ✅
+### 步骤 7.2 推送合并为每天一条 ✅（2026-09-05 补充）
+
+- 用户要求：医药+农业推送合并，节约 Server酱额度（免费 5 条/天）。
+- 方案：workflow 中医药 "Run monitor" 步骤不再注入 PUSH_KEY（其独立推送被抑制，
+  **医药代码零改动**）；新增 `notify_combined.py` 作为唯一推送出口，把两板块信号
+  拼成一条消息（标题 `医药:x 农业:y｜农业快照`，正文两段代码块 + 看板链接）。
+- 本地实测：无额度时发送失败仅打印日志、exit=0，不阻断流水线。
+
+### 步骤 7.3 GitHub Pages 看板直达 ✅
 
 - workflow 新增 "Deploy dashboards to GitHub Pages"：gh-pages 分支自动更新 index.html + 两板块看板；
 - Pages 已通过 API 启用（HTTP 201），**线上地址实测 200**：

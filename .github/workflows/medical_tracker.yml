@@ -33,8 +33,7 @@ jobs:
 
       - name: Run monitor
         id: monitor
-        env:
-          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+        # 医药侧不注入 PUSH_KEY：其独立推送被抑制，微信由下方合并推送统一发出（每天 1 条）
         run: |
           timeout 900 python app/notify.py 2>&1 | tee output.txt || true
           python app/ci_parse.py
@@ -59,11 +58,11 @@ jobs:
         id: agri_parsed
         run: cat alert_result_agri.txt >> $GITHUB_OUTPUT
 
-      - name: Agri WeChat push
+      - name: Combined WeChat push（医药+农业 每天一条）
         env:
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
           PUSHDEER_KEY: ${{ secrets.PUSHDEER_KEY }}
-        run: python agriculture/app/notify_agri.py || true
+        run: python agriculture/app/notify_combined.py || true
 
       - name: Generate agri dashboard
         timeout-minutes: 5
