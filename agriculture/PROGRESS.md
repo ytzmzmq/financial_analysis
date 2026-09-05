@@ -179,3 +179,25 @@ agriculture/
 ### 自检
 
 - selfcheck 全部通过（新增因子未破坏防前视与执行约束断言）。
+
+
+---
+
+## 第 7 章：微信推送与 GitHub Pages（2026-09-05）
+
+### 步骤 7.1 微信推送 ✅
+
+- `app/notify_agri.py`：独立实现 Server酱/PushDeer 推送（不引用医药代码），所有警报级别均推；
+- workflow 新增 "Agri WeChat push" 步骤（ci_parse 之后）；推送失败不阻断流水线
+  （Server酱免费额度 5 条/天，医药+农业同推时可能耗尽，次日自动恢复）；
+- 实测：Server酱当日额度耗尽返回失败（日志可见），明天定时运行自动恢复推送。
+
+### 步骤 7.2 GitHub Pages 看板直达 ✅
+
+- workflow 新增 "Deploy dashboards to GitHub Pages"：gh-pages 分支自动更新 index.html + 两板块看板；
+- Pages 已通过 API 启用（HTTP 201），**线上地址实测 200**：
+  - 落地页：https://ytzmzmq.github.io/financial_analysis/
+  - 农业看板：https://ytzmzmq.github.io/financial_analysis/dashboard_agri.html
+  - 医药看板：https://ytzmzmq.github.io/financial_analysis/dashboard.html
+- 过程报错（均记录 error_log #15）：①heredoc 结束符带缩进导致脚本损坏（改 printf）；
+  ②gh-pages 子仓库缺 user 配置（git config 移到 git init 之后）；③两次误提交临时诊断文件（已清理+ignore）。
