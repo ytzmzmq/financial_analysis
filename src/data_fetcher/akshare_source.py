@@ -1,4 +1,6 @@
 """A股数据源：行情、板块指数、资金流向 —— 通过 AKShare"""
+import time
+
 import pandas as pd
 import numpy as np
 
@@ -6,6 +8,30 @@ try:
     import akshare as ak
 except ImportError:
     ak = None
+
+
+def _retry(fn, label: str, attempts: int = 3, base_delay: float = 2.0):
+    """带指数退避的重试。
+
+    AKShare 行情接口偶发返回非 JSON（限流/反爬页面），报错形如
+    "Expecting value: line 1 column 1 (char 0)"。这类失败通常是瞬时的，
+    而单次失败会让当天整个信号缺失，代价过大——重试 3 次（2s/4s 退避），
+    仍失败才抛异常，并在消息里带上接口名以便定位。
+    """
+    last_exc = None
+    for i in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            print(f"[AKShare] {label} 第 {i}/{attempts} 次失败: "
+                  f"{type(e).__name__}: {e}")
+            if i < attempts:
+                time.sleep(base_delay * (2 ** (i - 1)))
+    raise RuntimeError(
+        f"{label} 连续 {attempts} 次失败: {type(last_exc).__name__}: {last_exc}"
+    ) from last_exc
+
 
 def fetch_realtime_price() -> float | None:
     """[Deprecated] 旧版: 通过 512170 ETF 代理获取涨跌幅
@@ -78,8 +104,11 @@ class AKShareSource:
         if ak is None:
             raise ImportError("akshare not installed")
 
-        # 1. 获取历史日线
-        df = ak.index_hist_sw(symbol="801150", period="day")
+        # 1. 获取历史日线（核心源：偶发非 JSON 响应，重试 3 次）
+        df = _retry(lambda: ak.index_hist_sw(symbol="801150", period="day"),
+                    label="index_hist_sw(801150)")
+        if df is None or len(df) == 0:
+            raise RuntimeError("index_hist_sw(801150) 返回空数据")
         df = df.rename(columns={
             "日期": "date", "收盘": "close", "开盘": "open",
             "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount",

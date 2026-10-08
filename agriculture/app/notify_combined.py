@@ -21,7 +21,8 @@ from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-ALERT_TEXT = {"red": "🔴 行动日", "yellow": "🟡 关注", "silent": "⚪ 常态"}
+ALERT_TEXT = {"red": "🔴 行动日", "yellow": "🟡 关注", "silent": "⚪ 常态",
+              "error": "⚠️ 数据异常（未取到数据，非常态）", "unknown": "❓ 无输出（脚本未运行）"}
 BASE_URL = "https://ytzmzmq.github.io/financial_analysis"
 
 
@@ -69,8 +70,9 @@ def read_text(path: str, limit: int = 2200) -> str:
 def main() -> int:
     med = read_fields("alert_result.txt")
     agri = read_fields("alert_result_agri.txt")
-    med_alert = med.get("alert", "silent")
-    agri_alert = agri.get("alert", "silent")
+    # 文件缺失 = 对应脚本没跑起来，绝不能默认成 silent（否则故障日发"常态"）
+    med_alert = med.get("alert") or "unknown"
+    agri_alert = agri.get("alert") or "unknown"
     agri_summary = agri.get("summary", "")
 
     title = f"医药:{med_alert} 农业:{agri_alert}｜{agri_summary[:24]}"

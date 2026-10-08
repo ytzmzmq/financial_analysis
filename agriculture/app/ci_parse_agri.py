@@ -7,7 +7,14 @@ with open(path, encoding="utf-8", errors="replace") as f:
     text = f.read()
 
 m = re.search(r"\[(SILENT|YELLOW|RED)\]", text)
-alert = m.group(1).lower() if m else "silent"
+if m:
+    alert = m.group(1).lower()
+elif re.search(r"\[(ERROR|WARN)\]|Traceback", text):
+    # 取数失败会在打印级别之前退出（只留 [ERROR]）。旧逻辑默认 silent，
+    # 等于把"数据没取到"上报成"常态区间"。故障一律标 error。
+    alert = "error"
+else:
+    alert = "unknown"
 m = re.search(r"Score:\s*(\d+)", text)
 score = m.group(1) if m else "0"
 

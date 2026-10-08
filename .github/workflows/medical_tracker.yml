@@ -6,7 +6,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ── 预检：一天只干一次活（外部准点触发 + schedule 兜底 的去重闸门） ──
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.fresh.outputs.run }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - name: 预检 · 当日信号是否已生成
+        id: fresh
+        run: python scripts/should_run_today.py
+
   daily-check:
+    needs: preflight
+    # 外部/手动触发（workflow_dispatch）一律执行；
+    # 定时触发（schedule）仅在当日尚未产出信号时执行 —— 既避免重复微信推送，
+    # 也避免深夜那次用收盘数据覆盖 14:45 的尾盘信号；若 14:45 取数失败未落库，
+    # 晚些的这次会自动重试（自愈）。
+    if: github.event_name == 'workflow_dispatch' || needs.preflight.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # 权限下沉到 job 级：仅本 job 需要提交生成物与创建 issue（安全扫描整改）
@@ -154,3 +172,18 @@ jobs:
           git add -A
           git diff --staged --quiet || git commit -q -m "pages: $(date +%Y-%m-%d)"
           git push -q -u origin gh-pages || git push -q -f origin gh-pages || echo "pages push skipped"
+
+      # 数据健康标注：让「没取到数据」在 Actions 页面上可见（不使运行失败，
+      # 以免每天红叉造成告警疲劳；真正的失败上报走提交信息 + 微信 ⚠️ 数据异常）
+      - name: 数据健康标注
+        if: always()
+        run: |
+          M="${{ steps.parsed.outputs.alert }}"
+          A="${{ steps.agri_parsed.outputs.alert }}"
+          echo "医药=${M:-未产出} 农业=${A:-未产出}"
+          case "$M$A" in
+            *error*|*unknown*)
+              echo "::warning::本次未产出可信信号（医药=${M:-无} 农业=${A:-无}），已按数据异常上报；下一次运行会自动重试" ;;
+            *)
+              echo "::notice::今日信号正常（医药=${M:-无} 农业=${A:-无}）" ;;
+          esac

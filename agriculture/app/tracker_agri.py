@@ -66,7 +66,7 @@ def main() -> int:
             db_agri.log_error("tracker", msg)
         except Exception:  # noqa: BLE001
             print(msg, file=sys.stderr)
-        print(f"[SILENT] Score: 0 | 数据获取失败，今日无信号（{type(e).__name__}）")
+        print(f"[ERROR] Score: 0 | 数据获取失败，今日无信号（{type(e).__name__}）")
         return 1
 
     daily, cond, factors = feats["daily"], feats["cond"], feats["factors"]
