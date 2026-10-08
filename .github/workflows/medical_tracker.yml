@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: '45 6 * * 1-5'
   workflow_dispatch:
+    inputs:
+      force:
+        # 默认 false：外部准点触发也会走「当日去重」预检。
+        # 这样即使配了多个外部触发器（双保险），同一天也只会真正跑一次。
+        description: '忽略「当日去重」预检，强制运行一次'
+        type: boolean
+        default: false
 
 jobs:
   # ── 预检：一天只干一次活（外部准点触发 + schedule 兜底 的去重闸门） ──
@@ -20,11 +27,11 @@ jobs:
 
   daily-check:
     needs: preflight
-    # 外部/手动触发（workflow_dispatch）一律执行；
-    # 定时触发（schedule）仅在当日尚未产出信号时执行 —— 既避免重复微信推送，
-    # 也避免深夜那次用收盘数据覆盖 14:45 的尾盘信号；若 14:45 取数失败未落库，
-    # 晚些的这次会自动重试（自愈）。
-    if: github.event_name == 'workflow_dispatch' || needs.preflight.outputs.run == 'true'
+    # 一天只干一次活：准点触发与兜底触发都先过预检闸门；
+    # 只有显式 force=true 才无视预检（用于人工排查）。
+    # 准点那次成功 → 晚间兜底跳过（不重复微信推送、不用收盘价覆盖尾盘信号）；
+    # 准点那次取数失败未落库 → 晚间兜底自动重试（自愈）。
+    if: needs.preflight.outputs.run == 'true' || github.event.inputs.force == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # 权限下沉到 job 级：仅本 job 需要提交生成物与创建 issue（安全扫描整改）
