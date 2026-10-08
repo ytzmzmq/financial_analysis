@@ -5,6 +5,12 @@
 # 本文件用于根治该问题。
 * text=auto eol=lf
 
+# Windows 批处理必须是 CRLF —— LF 会让 .bat/.cmd 只执行第一行就闪退。
+# 仓库里历史上存的是 LF（本地工作树恰好是 CRLF 才没出事），这里显式纠正：
+# 入库正常化为 LF，检出到工作树时写回 CRLF。
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
 # 二进制文件：禁止任何换行/编码转换（数据产物由 CI 每个工作日写回仓库）
 *.db    binary
 *.sqlite binary

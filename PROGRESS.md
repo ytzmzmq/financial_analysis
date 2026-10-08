@@ -838,3 +838,11 @@ Confidence 评估逻辑：
 - **换行符统一为 LF + 新增 `.gitattributes`**：首次上传误用 CRLF 造成整文件 diff，已回正；`.gitattributes` 以 `* text=auto eol=lf` 加二进制声明（`*.db binary`）防止再次翻转。
 - **本地仓库损坏与恢复**：`.git/config` 硬编码 `http.proxy=127.0.0.1:7890`（代理已关 → 全部 fetch/push 失败）；`git stash` 尝试期间 `.git/refs` 与部分对象（含 HEAD `d53a02f`）丢失，`git status` 报 `fatal: not a git repository`。**远端完好无损**（`d53a02f` 是远端 `5e84c44` 的祖先，46 个提交全在远端），恢复方法见 `CI_HEALTH_2026-10-08.md` 第五节。**恢复前勿在该仓库执行 `git stash` / `git gc`。**
 - **待用户启用外部触发器**：方案 A = cron-job.org 在 14:45 调 dispatch 接口（电脑不用开机，需建最小权限 Fine-grained PAT：仅本仓库、Actions: Read and write）；方案 B = 本机 Windows 计划任务。详见报告第四节。
+
+### 14:45 准点方案落地（同日续二）
+
+- **发现本机 Windows 时区是美西 Pacific（当前 UTC-7）**，而目标是**北京时间 14:45**（A股尾盘），相差 15 小时：北京 14:52 = 当地 23:52(PDT) / 22:52(PST)。
+- **方案 B 已代配并验证**：新增 `scripts/trigger_ci.py`（含北京工作日 14:45~15:30 窗口判断；令牌运行时从 Windows 凭据管理器实时读取，不落盘）+ `scripts/trigger_ci.bat`（GBK+CRLF 启动器）。计划任务 `FinancialAnalysis_CI_1452`：周日~周四当地 22:52 与 23:52 双触发（覆盖夏令时切换），`StartWhenAvailable`，State Ready，手动 kick 一次 `LastTaskResult=0`。日志在 `%LOCALAPPDATA%\financial_analysis_ci\trigger_ci.log`。
+- **方案 A 待用户操作**：cron-job.org 14:45（Asia/Shanghai）调 dispatch，与 B 的北京 14:52 错开 7 分钟。
+- **`.gitattributes` 补批处理规则**：仓库历史上把 `.bat` 存成了 LF（本地工作树恰好是 CRLF 才没出事），已加 `*.bat/*.cmd text eol=crlf` 纠正。
+- 验证：`trigger_ci.py --force` 实调 dispatch 返回 204；任务手动 kick 后日志正确输出「北京窗口外，跳过」。
