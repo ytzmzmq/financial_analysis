@@ -785,3 +785,56 @@ Confidence 评估逻辑：
 |------|------|------|
 | `src/models/factor_optimizer.py` | 修改 | temporal_stability() 重构为纯计算; 新增 factor_health_analysis()(Evidence-based Grade/Confidence/Action); 新增 version_recommendation()(版本决策); 新增 HEALTH_ACTIONS 映射; screen_factors() 恢复三漏斗; run_full_pipeline() 集成监测层+版本决策 |
 | `app/monthly_audit.py` | 修改 | 新增 _combo_factor_statistics() A6; 健康监测层改用 factor_health_analysis() 带 A1/freq evidence; 新增版本决策章节; A3a 空值清理修复 |
+
+---
+
+## 第十二章：CI 健康巡检 — 故障上报缺陷修复 (2026-10-08)
+
+### 背景
+
+用户要求巡检最新的每日工作流（`.github/workflows/medical_tracker.yml`，医药+农业合并流水线）是否有问题。本地仓库停在 9/5，故全部结论取自远端证据：GitHub Actions 运行页（匿名可读）、commits Atom 源、jsDelivr 拉取 CI 每日提交的 SQLite 产物。
+
+### 巡检方法（可复用）
+
+- 运行历史/状态：`github.com/<repo>/actions/workflows/<wf>.yml` 与单次运行页 `/actions/runs/<id>`（匿名可读，不受 API 限流）
+- 提交时间线：`github.com/<repo>/commits/<branch>.atom`（纯 UTC 时间戳，用于推算真实触发时刻）
+- 产物内容：`cdn.jsdelivr.net/gh/<owner>/<repo>@main/<path>`（可下 `signals.db`，含 `signals` 与 `system_log` 两张表）
+- 注意：本仓库 `.git/config` 硬编码 `http.proxy=127.0.0.1:7890`，代理关掉后 git 全线失败；本地为 shallow 克隆且 `origin/main` 引用卡在旧 graft 点，真实 tip 需从 `FETCH_HEAD` 取
+
+### 核心发现：取数失败被上报成"常态区间"（P0）
+
+`system_log` 表 11 条同型错误 `数据拉取失败: Expecting value: line 1 column 1 (char 0)`（8/21 起，最近一次即当日运行 10-08 14:05）。根因是 `ak.index_hist_sw(symbol="801150")` 偶发返回非 JSON 页面（限流/反爬）且**无重试**。
+
+失败传播链：`notify.py` 在 `_load_data()` 抛错后只打印 `[ERROR]` 便 return，全程不输出级别 → `ci_parse.py` 旧逻辑 `alert = m.group(1).lower() if m else "silent"` **默认 silent** → 提交信息与微信推送均报「医药:silent」。实测 10-05、10-08 两天数据没取到、`signals` 表无对应行，对外却报常态。农业侧同病：`tracker_agri.py` 失败分支打印 `[SILENT]`。
+
+### 修复（5 文件，+53/−8）
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `app/ci_parse.py` | 修改 | 无级别时区分 `error`（含 `[ERROR]/[WARN]/Traceback`）与 `unknown`（空输出），不再落 silent |
+| `agriculture/app/ci_parse_agri.py` | 修改 | 同上 |
+| `agriculture/app/tracker_agri.py` | 修改 | 取数失败分支 `[SILENT]` → `[ERROR]` |
+| `agriculture/app/notify_combined.py` | 修改 | ALERT_TEXT 增 `error/unknown`；结果文件缺失默认值 silent → unknown |
+| `src/data_fetcher/akshare_source.py` | 修改 | 新增 `_retry()`（3 次、2s/4s 退避）包住 `index_hist_sw`；空数据显式报错 |
+| `scripts/verify_ci_fix.py` | 新增 | 离线回归校验（11 项，不联网不需 akshare） |
+
+故障日此后显示 `医药:error` / 微信 `⚠️ 数据异常`，且**不**触发 Issue（Issue 仍只在 red 时创建，避免噪声）。
+
+### 未决事项（待用户决策，未擅自改动）
+
+1. **调度时点偏差**：cron 写 14:45 北京（UTC 06:45），实测触发在 UTC 12:00–15:20 = 北京 20:00–23:20（#107 触发 15:17 + 历时 6m20s = 提交 15:24 UTC 自洽）。GitHub 公共仓库定时任务 best-effort 排队，延迟 5.5–8.5h 且每天不同 ⇒ "收盘前 15 分钟"语义失效。另：仓库 60 天无人工提交会被 GitHub 自动停用定时任务（上次人工提交 9/5）。
+2. **本地仓库待整理**：`http.proxy` 需 unset；shallow 克隆 + `origin/main` 引用卡死需 `git fetch` 后 `merge --ff-only` 追平。
+
+### 相关文件
+
+- 巡检报告：`CI_HEALTH_2026-10-08.md`
+- 修复补丁：`ci_fix_2026-10-08.patch`
+
+### 后续处置（同日续）
+
+- **推送方式改为 GitHub REST API（Git Data API）**：本地 `.git` 已损坏（见下），故不经本地 git，直接建 blob/tree/commit 并更新 `refs/heads/main` → 提交 `2202ff2`。脚本：`_ci_fix_backup_2026-10-08/push_via_api.py`（仓库外）。
+- **新增 14:45 准点方案**：保留 `schedule` 兜底 + 外部 `workflow_dispatch` 准点触发，用新增的 `preflight` job + `scripts/should_run_today.py` 做「一天只干一次活」闸门。14:45 成功则晚间兜底跳过（不重复推微信、不用收盘价覆盖尾盘信号）；14:45 取数失败未落库则晚间自动重试（自愈）。技术上可行：`fetch_sw_medical()` 会用 `index_min_sw`（或 512170 ETF 代理）把当日实时价拼进日线，14:45 跑出的 `signals.date` 就是当日。
+- **新增「数据健康标注」步骤**：取数异常时在 Actions 页面打 `::warning::`（**不**使运行失败，避免每天红叉造成告警疲劳）。
+- **换行符统一为 LF + 新增 `.gitattributes`**：首次上传误用 CRLF 造成整文件 diff，已回正；`.gitattributes` 以 `* text=auto eol=lf` 加二进制声明（`*.db binary`）防止再次翻转。
+- **本地仓库损坏与恢复**：`.git/config` 硬编码 `http.proxy=127.0.0.1:7890`（代理已关 → 全部 fetch/push 失败）；`git stash` 尝试期间 `.git/refs` 与部分对象（含 HEAD `d53a02f`）丢失，`git status` 报 `fatal: not a git repository`。**远端完好无损**（`d53a02f` 是远端 `5e84c44` 的祖先，46 个提交全在远端），恢复方法见 `CI_HEALTH_2026-10-08.md` 第五节。**恢复前勿在该仓库执行 `git stash` / `git gc`。**
+- **待用户启用外部触发器**：方案 A = cron-job.org 在 14:45 调 dispatch 接口（电脑不用开机，需建最小权限 Fine-grained PAT：仅本仓库、Actions: Read and write）；方案 B = 本机 Windows 计划任务。详见报告第四节。

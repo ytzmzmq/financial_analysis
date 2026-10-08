@@ -1,0 +1,21 @@
+# 统一换行符策略：入库一律 LF，避免 Windows/Linux 往返造成「整文件 diff」
+#
+# 背景：2026-10-08 的一次修复提交曾误把 CRLF 写进仓库（远端原本全为 LF），
+# 导致 tracker_agri.py、akshare_source.py 等出现 +185/−185 式的整文件 diff。
+# 本文件用于根治该问题。
+* text=auto eol=lf
+
+# 二进制文件：禁止任何换行/编码转换（数据产物由 CI 每个工作日写回仓库）
+*.db    binary
+*.sqlite binary
+*.csv   text eol=lf
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary
+*.xlsx  binary
+*.zip   binary
