@@ -27,7 +27,8 @@ jobs:
 
   daily-check:
     needs: preflight
-    # 一天只干一次活：准点触发与兜底触发都先过预检闸门；
+    # 一天只干一次活：准点触发与兜底触发都先过预检闸门（预检按「最近 A 股交易日」
+    # 判定，schedule 被延迟到跨过北京午夜也不会误放行——2026-10-12 事故的修复）；
     # 只有显式 force=true 才无视预检（用于人工排查）。
     # 准点那次成功 → 晚间兜底跳过（不重复微信推送、不用收盘价覆盖尾盘信号）；
     # 准点那次取数失败未落库 → 晚间兜底自动重试（自愈）。
@@ -102,7 +103,20 @@ jobs:
           git add -f dashboard.html data/processed/signals.db dashboard_agri.html agriculture/data/processed/signals.db 2>/dev/null || true
           # 农业数据缓存一并入库：Actions 无本地缓存，单数据源故障时可回退到昨日缓存
           git add -f agriculture/data/raw/cache/*.csv 2>/dev/null || true
-          git diff --staged --quiet || (git commit -m "[auto] $(date +%Y-%m-%d) 医药:${{ steps.parsed.outputs.alert }} 农业:${{ steps.agri_parsed.outputs.alert }}（${{ steps.agri_parsed.outputs.summary }}）" && git push || true)
+          if git diff --staged --quiet; then
+            echo "无变更可提交"
+            exit 0
+          fi
+          git commit -m "[auto] $(date +%Y-%m-%d) 医药:${{ steps.parsed.outputs.alert }} 农业:${{ steps.agri_parsed.outputs.alert }}（${{ steps.agri_parsed.outputs.summary }}）"
+          # push 失败不能静默吞掉：当日信号行会缺失（次日预检以「最近交易日」判定，
+          # 凌晨兜底可自动回补，但若连续失败仍需人工介入）。失败重试一次后打 error 注解
+          # （不 exit 1，让后续 Issue/Pages 步骤继续执行）。
+          if ! git push; then
+            sleep 10
+            if ! git push; then
+              echo "::error::git push 两次失败——当日信号未推送回仓库，请检查 Actions 凭据/网络（次日凌晨的 schedule 兜底会尝试自动回补）"
+            fi
+          fi
 
       - name: Issue (RED)
         if: steps.parsed.outputs.alert == 'red'
