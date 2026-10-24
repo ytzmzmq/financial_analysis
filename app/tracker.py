@@ -233,6 +233,9 @@ def run_cli():
     print(f"  收盘价:     {sig['price']:.2f}")
     print(f"  Score:      {sig['score']}")
     print(f"  Factors:    {sig['n_factors']} triggered")
+    # 周频模型×日频运行口径提示：当日 14:45 用盘中价当"周收盘"拼入周线，
+    # 正式信号以周五收盘为准（2026-10-24 模型审查 P5 整改）
+    print("  (预估口径: 以当前价当作本周收盘试算; 正式信号以周五收盘为准)")
     print()
 
     for r in sig["rules_status"]:

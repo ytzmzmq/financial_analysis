@@ -155,12 +155,15 @@ def run(dry_run: bool = False, test_push: bool = False):
     model_ver = sig.get("model_version", "")
 
     # 构建推送内容 (V5.2 增强格式)
+    # 口径说明：周频模型×日频运行——当日 14:45 以盘中价充当"本周收盘"试算，
+    # 正式信号以周五收盘为准（2026-10-24 模型审查 P5 整改）
     lines = [
         f"日期: {sig['date']}",
         f"指数: {sig['price']:.0f}",
         f"Score: {score}/{max_score}  ({n_factors}个因子触发)",
         f"分级: {tier}  模型: {model_ver}",
         f"警报: [{alert['level'].upper()}] {alert['message']}",
+        "(预估口径: 盘中价试算, 正式信号以周五收盘为准)",
     ]
 
     # 底部概率

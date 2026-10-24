@@ -157,6 +157,29 @@ def bootstrap_ci(data: np.ndarray, n_iter: int = 2000, seed: int = 42) -> tuple:
     return (np.percentile(means, 2.5), np.percentile(means, 97.5))
 
 
+def block_bootstrap_ci(data: np.ndarray, block_len: int, n_iter: int = 2000,
+                       seed: int = 42) -> tuple:
+    """移动块自助（moving-block）95% CI —— 面向重叠前瞻收益的诚实方差。
+
+    周频 h 周前瞻收益相邻样本共享 h-1 周信息，iid bootstrap（bootstrap_ci）
+    低估方差可达 ~sqrt(h) 倍（2026-10-24 模型审查：见根目录 MODEL_AUDIT）。
+    块长必须不小于前瞻期 h，否则仍低估。样本不足以构成 2 个完整块时返回 NaN
+    ——那意味着"无法给出诚实的置信区间"，不应伪装成数字。
+    """
+    data = np.asarray(data, dtype=float)
+    n = len(data)
+    if n < 2 * block_len:
+        return (np.nan, np.nan)
+    rng = np.random.RandomState(seed)
+    n_blocks = int(np.ceil(n / block_len))
+    means = np.empty(n_iter)
+    for b in range(n_iter):
+        starts = rng.randint(0, n - block_len + 1, size=n_blocks)
+        idx = np.concatenate([np.arange(s, s + block_len) for s in starts])[:n]
+        means[b] = data[idx].mean()
+    return (np.percentile(means, 2.5), np.percentile(means, 97.5))
+
+
 def temporal_stability(factor: pd.Series, med_w: pd.Series,
                        forward_weeks: int = 13,
                        n_windows: int = 4,
@@ -523,11 +546,15 @@ def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
         if e_cond <= 5.0:
             continue
 
-        # 漏斗3: Uplift CI下限 > 1%
+        # 漏斗3: Uplift CI下限 > 1%（iid 口径，历史沿用）
+        # 同时给出移动块口径（block_len=前瞻期）：重叠收益的诚实方差。
+        # 2026-10-24 审查结论：V5.2 四因子的 iid CI 低估方差最多 ~sqrt(13)≈3.6 倍，
+        # 入选判定应以 block 口径复核；此处不改历史门槛，只并排披露两套数字。
         uplift_vals = fwd_rets - e_uncond
         ci_low, ci_high = bootstrap_ci(uplift_vals)
         if np.isnan(ci_low) or ci_low <= 1.0:
             continue
+        bci_low, bci_high = block_bootstrap_ci(uplift_vals, block_len=forward_weeks)
 
         results.append({
             "factor": col,
@@ -538,6 +565,9 @@ def screen_factors(pool: pd.DataFrame, med_w: pd.Series,
             "uplift": e_cond - e_uncond,
             "uplift_ci_low": ci_low,
             "uplift_ci_high": ci_high,
+            "uplift_block_ci_low": bci_low,
+            "uplift_block_ci_high": bci_high,
+            "block_ci_ok": bool(not np.isnan(bci_low) and bci_low > 1.0),
             "n_signals": n_triggered,
         })
 
