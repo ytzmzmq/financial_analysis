@@ -68,6 +68,14 @@ def read_text(path: str, limit: int = 2200) -> str:
 
 
 def main() -> int:
+    # 个人规则看门狗(DECISION_MEMO §四):事实 + 你的规则状态;失败降级不阻断推送
+    try:
+        sys.path.insert(0, str(Path.cwd()))
+        from app.rules_engine import render_rules_section
+        rules_section = render_rules_section(Path.cwd())
+    except Exception as e:  # noqa: BLE001
+        rules_section = f"(规则区不可用:{e})"
+
     med = read_fields("alert_result.txt")
     agri = read_fields("alert_result_agri.txt")
     # 文件缺失 = 对应脚本没跑起来，绝不能默认成 silent（否则故障日发"常态"）
@@ -78,6 +86,7 @@ def main() -> int:
     title = f"医药:{med_alert} 农业:{agri_alert}｜{agri_summary[:24]}"
     desp = (
         f"# 每日板块信号（合并推送）\n\n"
+        f"{rules_section}\n\n"
         f"## 💊 医药生物 {ALERT_TEXT.get(med_alert, med_alert)}（Score {med.get('score', '0')}）\n\n"
         f"```\n{read_text('output.txt')}\n```\n\n"
         f"## 🌾 农业 {ALERT_TEXT.get(agri_alert, agri_alert)}（恐慌分 {agri.get('score', '0')}）\n\n"
@@ -85,7 +94,8 @@ def main() -> int:
         f"```\n{read_text('output_agri.txt')}\n```\n\n"
         f"[🌾 农业看板]({BASE_URL}/dashboard_agri.html)｜"
         f"[💊 医药看板]({BASE_URL}/dashboard.html)｜"
-        f"[📖 农业报告](https://github.com/ytzmzmq/financial_analysis/blob/main/agriculture/REPORT.md)"
+        f"[📖 农业报告](https://github.com/ytzmzmq/financial_analysis/blob/main/agriculture/REPORT.md)｜"
+        f"[📋 裁决备忘录](https://github.com/ytzmzmq/financial_analysis/blob/main/DECISION_MEMO_2027-04.md)"
     )
 
     sent = False
