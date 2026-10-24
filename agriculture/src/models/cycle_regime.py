@@ -111,7 +111,12 @@ def _norm_pdf(x: float, mu: float, sigma2: float) -> float:
 # ── 周期相位（HP 月频周期分量） ─────────────────────────────
 
 def cycle_phase(monthly_log_price: pd.Series, train_end: pd.Timestamp = TRAIN_END) -> pd.DataFrame:
-    """HP 周期分量 → z（std 用训练段冻结）→ 相位与 CycleScore。"""
+    """HP 周期分量 → z（std 用训练段冻结）→ 相位与 CycleScore。
+
+    ⚠️ 全样本双边滤波——历史中间点含未来信息（回测前视）。2026-10-24 模型审查
+    实测该口径使 V1.2 测试段虚增约 54 个百分点（见根目录 MODEL_AUDIT_2026-10-24.md）。
+    生产/回测/回填一律使用 cycle_phase_asof()；本函数仅为审查复现保留。
+    """
     from statsmodels.tsa.filters.hp_filter import hpfilter
 
     s = monthly_log_price.dropna()
@@ -137,6 +142,51 @@ def cycle_phase(monthly_log_price: pd.Series, train_end: pd.Timestamp = TRAIN_EN
         "cycle_score": z.mul(-1).clip(-1, 1),
     })
     return out
+
+
+def cycle_phase_asof(monthly_log_price: pd.Series, train_end: pd.Timestamp = TRAIN_END,
+                     min_obs: int = 36) -> pd.DataFrame:
+    """扩展窗单边 HP（无前视）——每个月末 t 只用 ≤t 的数据重跑滤波取端点值。
+
+    与 cycle_phase() 的关系：最新端点两法等价（都不用未来），差异全部在历史
+    中间点。回测/回填/看板历史必须用本函数，否则周期门带先知偏差。
+    std 仍取训练段冻结（与旧口径一致，估计只依赖训练数据）。
+    前 min_obs-1 个月无值（样本不足），与"相位需要足够历史"的现实一致。
+    """
+    from statsmodels.tsa.filters.hp_filter import hpfilter
+
+    s = monthly_log_price.dropna()
+    train_mask = s.index <= train_end
+    std_train = None
+    if train_mask.sum() > 36:
+        cyc_train, _ = hpfilter(s[train_mask], lamb=HP_LAMBDA_MONTHLY)
+        std_train = float(cyc_train.std())
+
+    cyc_vals = []
+    for t in s.index:
+        sub = s.loc[:t]
+        if len(sub) < min_obs:
+            cyc_vals.append(np.nan)
+            continue
+        c, _ = hpfilter(sub, lamb=HP_LAMBDA_MONTHLY)
+        cyc_vals.append(float(c.iloc[-1]))
+    cyc = pd.Series(cyc_vals, index=s.index)
+
+    if not std_train or np.isnan(std_train) or std_train == 0:
+        std_train = float(cyc.dropna().std()) or 1.0
+    z = cyc / std_train
+    slope = z - z.shift(3)
+    phase = pd.Series(index=s.index, dtype=object)
+    phase[(z <= -1.0)] = "谷"
+    phase[(z >= 1.0)] = "峰"
+    phase[(z > -1.0) & (z < 1.0) & (slope > 0)] = "扩张"
+    phase[(z > -1.0) & (z < 1.0) & (slope <= 0)] = "收缩"
+    return pd.DataFrame({
+        "cycle_z": z,
+        "cycle_slope": slope,
+        "cycle_phase": phase,
+        "cycle_score": z.mul(-1).clip(-1, 1),
+    })
 
 
 def expand_phase_to_daily(phase_df: pd.DataFrame, calendar: pd.DatetimeIndex) -> pd.DataFrame:

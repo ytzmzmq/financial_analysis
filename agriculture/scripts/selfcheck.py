@@ -86,7 +86,7 @@ def main() -> None:
     fq = pd.DataFrame(cfg["streak_tables"]["frequency"]).set_index("n")
     assert mk["p_up_tomorrow"].between(0, 1).all()
     assert fq["p_continue"].dropna().between(0, 1).all()
-    assert set(cfg["protocol"]["test_peek_note"]) and cfg["protocol"]["test_peek_count"] == 3
+    assert set(cfg["protocol"]["test_peek_note"]) and cfg["protocol"]["test_peek_count"] >= 3
     print("[4] 冻结表取值域与版本披露 ... OK")
 
     # ── 5. 持仓状态与最新信号可复算 ──

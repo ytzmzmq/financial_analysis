@@ -12,6 +12,10 @@
   网格：panic_threshold∈{无,70,80} × risk_exit∈{关,开} = 6 配置 ≤ 60。
 - 因子三漏斗门槛不变（t≥3、前后半一致、单年占比≤40%、|ρ|≤0.7）。
 - 验证段上线门槛：超额>0、回撤 < 买入持有、半年目标达成率 ≥55%、0 违规。
+- 2026-10-24 修正（V1.3）：cycle_phase 改为扩展窗单边 HP（cycle_phase_asof），
+  修复全样本双边滤波的回测前视（实测旧口径虚增约 54 个百分点，见根目录
+  MODEL_AUDIT_2026-10-24.md）；当月进行中月份不再进入滤波。本次重校准 = 旧口径
+  作废后的首次干净重跑，测试段第 4 次使用（前 3 次均在污染口径下，不可比）。
 
 用法: python scripts/calibrate_signals.py
 产出: src/models/model_config_agri.json + data/processed/calibration_report.md
@@ -38,9 +42,10 @@ from scipy import stats  # noqa: E402
 from src.backtest.anti_overfit import deflated_sharpe, pbo_cscv, reality_check  # noqa: E402
 from src.backtest.backtester import (  # noqa: E402
     compute_metrics, desired_position_v12, position_signals, run_backtest,
+    window_metrics,
 )
 from src.data_fetcher.akshare_source import load_core_data  # noqa: E402
-from src.models.factor_library import composite_score  # noqa: E402
+from src.models.factor_library import FACTOR_DEFS, composite_score  # noqa: E402
 from src.models.factor_screen import screen_factors  # noqa: E402
 from src.models.pipeline import build_features  # noqa: E402
 from src.models.streak_stats import build_all_tables  # noqa: E402
@@ -67,7 +72,10 @@ def main() -> None:
 
     # ── 1. 特征 ──
     log("\n## 1. 特征构建\n")
-    data = load_core_data(use_cache_days=None)
+    # use_cache_days=7：重校准基于最近一次 CI 落盘的数据快照（≤7 天），无需在线取数；
+    # 数据时点写入下方日志，保证可复现。
+    data = load_core_data(use_cache_days=7)
+    log(f"- 数据快照：agri 末值 {data['agri'].index.max().date()}")
     feats = build_features(data)
     daily, cond, factors = feats["daily"], feats["cond"], feats["factors"]
     rp = feats["regime_params"]
@@ -101,17 +109,18 @@ def main() -> None:
                       "panic_threshold": pt, "exit_mode": exit_mode}
             pos = desired_position_v12(cond, daily["close"], score_panic, params)
             sig = position_signals(pos)
-            bt = run_backtest(sig, *TRAIN_FULL, close=daily["close"])
-            grid.append({"params": params, "returns": bt["state"]["strat_ret"],
+            # 全历史回测一次，窗口指标用 window_metrics 切片
+            # （run_backtest(start,end) 从零仓位起步，会丢弃窗口起点的既有持仓——
+            #   2026-10-24 审查发现 as-of 口径下 2022 测试段因此漏掉整段继承持仓）
+            bt = run_backtest(sig, daily.index[0], daily.index[-1], close=daily["close"])
+            grid.append({"params": params, "bt": bt, "returns": bt["state"]["strat_ret"],
                          "index_ret": bt["state"]["index_ret"], "trades": bt["trades"]})
 
     bh_sub = compute_metrics(grid[0]["index_ret"].loc[SUBTRAIN[0]:SUBTRAIN[1]],
                              grid[0]["index_ret"].loc[SUBTRAIN[0]:SUBTRAIN[1]])
     log(f"- 子训练段买入持有：年化 {bh_sub['ann_return']:+.1%}，回撤 {bh_sub['max_drawdown']:.1%}")
     for g in grid:
-        g["sub_metrics"] = compute_metrics(
-            g["returns"].loc[SUBTRAIN[0]:SUBTRAIN[1]],
-            g["index_ret"].loc[SUBTRAIN[0]:SUBTRAIN[1]], g["trades"])
+        g["sub_metrics"] = window_metrics(g["bt"], *SUBTRAIN)
 
     mask = (grid[0]["returns"].index >= SUBTRAIN[0]) & (grid[0]["returns"].index <= SUBTRAIN[1])
     rc = reality_check(np.column_stack([g["returns"][mask].values for g in grid]),
@@ -145,8 +154,7 @@ def main() -> None:
 
     chosen, chosen_metrics = None, None
     for cand in ranked:
-        vm = compute_metrics(cand["returns"].loc[VALID[0]:VALID[1]],
-                             cand["index_ret"].loc[VALID[0]:VALID[1]], cand["trades"])
+        vm = window_metrics(cand["bt"], *VALID)
         # 相对门槛（V1.2 修订，仅基于验证段）：全面优于买入持有 + 0 违规
         ok = (vm["ann_return"] > bh_val["ann_return"]
               and vm["max_drawdown"] > bh_val["max_drawdown"]
@@ -159,18 +167,40 @@ def main() -> None:
             f"违规 {vm['min_hold_violations']} {'✓' if ok else '✗'}")
         if ok and chosen is None:
             chosen, chosen_metrics = cand, vm
-    if chosen is None:
-        log("\n- ⚠️ 无配置达验证段门槛 → 取排名 Top1 标记 degraded=true")
-        chosen = ranked[0]
-        chosen_metrics = chosen["sub_metrics"]
+    no_gate_pass = chosen is None
+    if no_gate_pass:
+        # V1.3 修订（2026-10-24）：无配置过门槛时【延续现行生产配置】而非切换 Top1。
+        # 理由：降级状态下更换实盘行为没有依据——本轮诚实口径下 Top1(rec80_trend)
+        # 测试段年化 -17%/回撤 -65%，远劣于既有 cycle_only(-4.8%/-46.1%)，
+        # 部署它属于已知损害。degraded=true 提示人工评审是否停用/重构。
+        incumbent = None
+        old_cfg_path = AGRI / "src" / "models" / "model_config_agri.json"
+        if old_cfg_path.exists():
+            try:
+                old_sig = json.loads(old_cfg_path.read_text(encoding="utf-8"))["signals"]
+                incumbent = next((g for g in grid
+                                  if g["params"]["panic_threshold"] == old_sig.get("panic_threshold")
+                                  and g["params"]["exit_mode"] == old_sig.get("exit_mode")), None)
+            except Exception:  # noqa: BLE001 — 旧配置不可读则退回 Top1
+                incumbent = None
+        if incumbent is not None:
+            log(f"\n- ⚠️ 无配置达验证段门槛 → 延续现行生产配置 "
+                f"panic={incumbent['params']['panic_threshold']} exit={incumbent['params']['exit_mode']}"
+                f"（而非排名 Top1 {ranked[0]['params']['exit_mode']}）标记 degraded=true")
+            chosen, chosen_metrics = incumbent, window_metrics(incumbent["bt"], *VALID)
+        else:
+            log("\n- ⚠️ 无配置达验证段门槛 → 取排名 Top1 标记 degraded=true")
+            chosen = ranked[0]
+            chosen_metrics = chosen["sub_metrics"]
 
     log(f"\n**冻结配置：{chosen['params']}，恐慌因子={panic_factors}**\n")
 
     # ── 6. 测试段终评估 ──
-    log("\n## 5. 测试段终评估（2022-01 → 最新；第 3 次使用，此后冻结）\n")
+    log("\n## 5. 测试段终评估（2022-01 → 最新；第 4 次使用：前 3 次为 HP 前视口径不可比，本次为单边口径首评）\n")
     pos_t = desired_position_v12(cond, daily["close"], score_panic, chosen["params"])
-    bt = run_backtest(position_signals(pos_t), *TEST, close=daily["close"])
-    m = bt["metrics"]
+    bt_full = run_backtest(position_signals(pos_t), daily.index[0], daily.index[-1],
+                           close=daily["close"])
+    m = window_metrics(bt_full, *TEST)
     bh_test = compute_metrics(daily["close"].pct_change().loc[TEST[0]:],
                               daily["close"].pct_change().loc[TEST[0]:])
     log(f"- 年化 {m['ann_return']:+.1%} vs 指数 {bh_test['ann_return']:+.1%}（超额 {m['ann_excess']:+.1%}）")
@@ -178,10 +208,11 @@ def main() -> None:
     log(f"- 交易 {m['n_trades']} 次，滚动半年胜率 {m['roll126_win_vs_index']:.0%}，"
         f"半年目标(绝对4%/超额3%)达成率 {m['roll126_win_abs4_or_ex3']:.0%}")
     log(f"- 最差半年 {m['roll126_worst']:+.1%}；**7 天约束违规 {m['min_hold_violations']} 次**；"
-        f"顺延卖出 {bt['deferred_sells']} 次")
-    if bt["trades"]:
+        f"顺延卖出 {bt_full['deferred_sells']} 次")
+    test_trades = [t for t in bt_full["trades"] if t["buy_date"] >= TEST[0]]
+    if test_trades:
         log("\n- 测试段交易明细：")
-        for tr in bt["trades"]:
+        for tr in test_trades:
             if "sell_date" in tr:
                 pl = tr["sell_close"] / tr["buy_close"] - 1
                 log(f"  - 买 {tr['buy_date'].date()}@{tr['buy_close']:.0f} → 卖 {tr['sell_date'].date()}"
@@ -193,7 +224,7 @@ def main() -> None:
     tables_json = {name: json.loads(tbl.reset_index().to_json(orient="records", force_ascii=False))
                    for name, tbl in tables.items()}
     config = {
-        "version": "V1.2",
+        "version": "V1.3",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "architecture": "cycle_primary",
         "protocol": {
@@ -202,8 +233,9 @@ def main() -> None:
             "validation": [str(VALID[0].date()), str(VALID[1].date())],
             "test_start": str(TEST[0].date()),
             "grid": {"panic_threshold": GRID_PANIC, "exit_mode": GRID_EXIT},
-            "test_peek_count": 3,
-            "test_peek_note": "V1.0/V1.1/V1.2 各评估一次，测试段统计量偏乐观；真实基准以实盘为准",
+            "test_peek_count": 4,
+            "test_peek_note": "V1.0/V1.1/V1.2（HP 前视口径，作废不可比）各 1 次 + V1.3 单边口径 1 次；"
+                              "真实基准以实盘为准",
         },
         "factors": {
             "selected": selected,
@@ -214,7 +246,7 @@ def main() -> None:
             "theta_in": 0.0, "theta_out": -0.2,
             "panic_threshold": chosen["params"]["panic_threshold"],
             "exit_mode": chosen["params"]["exit_mode"],
-            "rules": "V1.2 周期主导：cycle_score>0 持有 / <-0.2 清仓（迟滞）；"
+            "rules": "V1.3 周期主导（单边 HP）：cycle_score>0 持有 / <-0.2 清仓（迟滞）；"
                      "score_panic≥阈值 且 recession<0.7 → 立即持有；"
                      "退出模式 exit_mode: cycle_only=仅迟滞门 | rec80_trend=区制+趋势双确认 | trend_break=MA60 趋势破坏",
         },
@@ -224,7 +256,7 @@ def main() -> None:
         "validation_eval": chosen_metrics,
         "test_eval": m,
         "test_eval_bh": bh_test,
-        "degraded": bool(chosen is not ranked[0]),
+        "degraded": bool(no_gate_pass),
     }
     cfg_path = AGRI / "src" / "models" / "model_config_agri.json"
     cfg_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")

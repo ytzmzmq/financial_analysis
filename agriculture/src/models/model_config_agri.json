@@ -1,6 +1,6 @@
 {
-  "version": "V1.2",
-  "generated_at": "2026-09-02T11:14:53",
+  "version": "V1.3",
+  "generated_at": "2026-10-24T04:43:42",
   "architecture": "cycle_primary",
   "protocol": {
     "train": [
@@ -27,8 +27,8 @@
         "trend_break"
       ]
     },
-    "test_peek_count": 3,
-    "test_peek_note": "V1.0/V1.1/V1.2 各评估一次，测试段统计量偏乐观；真实基准以实盘为准"
+    "test_peek_count": 4,
+    "test_peek_note": "V1.0/V1.1/V1.2（HP 前视口径，作废不可比）各 1 次 + V1.3 单边口径 1 次；真实基准以实盘为准"
   },
   "factors": {
     "selected": [
@@ -70,20 +70,20 @@
     "theta_out": -0.2,
     "panic_threshold": 80,
     "exit_mode": "cycle_only",
-    "rules": "V1.2 周期主导：cycle_score>0 持有 / <-0.2 清仓（迟滞）；score_panic≥阈值 且 recession<0.7 → 立即持有；退出模式 exit_mode: cycle_only=仅迟滞门 | rec80_trend=区制+趋势双确认 | trend_break=MA60 趋势破坏"
+    "rules": "V1.3 周期主导（单边 HP）：cycle_score>0 持有 / <-0.2 清仓（迟滞）；score_panic≥阈值 且 recession<0.7 → 立即持有；退出模式 exit_mode: cycle_only=仅迟滞门 | rec80_trend=区制+趋势双确认 | trend_break=MA60 趋势破坏"
   },
   "regime": {
     "method": "statsmodels",
     "mu": [
-      4.428510361653259e-05,
-      0.00423681997130458
+      4.428693019518026e-05,
+      0.004236793505063443
     ],
     "sigma2": [
-      0.0008263274921976642,
-      0.0045813360922189955
+      0.000826327799435537,
+      0.004581336333099007
     ],
-    "p00": 0.9734078441425594,
-    "p11": 0.9301081725995622,
+    "p00": 0.9734077979856909,
+    "p11": 0.9301083884355367,
     "low_regime": 0,
     "n_train": 1112,
     "last_train_date": "2021-12-31"
@@ -903,90 +903,90 @@
       {
         "k": 1,
         "cond_val": "收缩",
-        "n_obs": 141,
+        "n_obs": 75,
         "merged": false,
-        "p_up_tomorrow": 0.504,
-        "fwd5_med": 0.0025,
-        "fwd20_med": -0.0041,
-        "fwd60_med": -0.0409,
-        "fwd20_win": 0.475
+        "p_up_tomorrow": 0.373,
+        "fwd5_med": -0.0013,
+        "fwd20_med": 0.0007,
+        "fwd60_med": -0.0327,
+        "fwd20_win": 0.52
       },
       {
         "k": 1,
         "cond_val": "扩张",
-        "n_obs": 123,
+        "n_obs": 48,
         "merged": false,
-        "p_up_tomorrow": 0.545,
-        "fwd5_med": 0.0041,
-        "fwd20_med": 0.0124,
-        "fwd60_med": 0.0129,
-        "fwd20_win": 0.577
-      },
-      {
-        "k": 1,
-        "cond_val": "谷",
-        "n_obs": 45,
-        "merged": false,
-        "p_up_tomorrow": 0.289,
+        "p_up_tomorrow": 0.583,
         "fwd5_med": 0.0026,
-        "fwd20_med": 0.0068,
-        "fwd60_med": 0.0234,
-        "fwd20_win": 0.511
+        "fwd20_med": 0.0042,
+        "fwd60_med": 0.0309,
+        "fwd20_win": 0.521
       },
       {
         "k": 1,
         "cond_val": "峰",
-        "n_obs": 91,
+        "n_obs": 71,
         "merged": false,
-        "p_up_tomorrow": 0.484,
-        "fwd5_med": -0.0038,
+        "p_up_tomorrow": 0.465,
+        "fwd5_med": -0.0045,
         "fwd20_med": -0.0002,
-        "fwd60_med": 0.0385,
-        "fwd20_win": 0.495
+        "fwd60_med": 0.0375,
+        "fwd20_win": 0.493
+      },
+      {
+        "k": 1,
+        "cond_val": "谷",
+        "n_obs": 1249,
+        "merged": true,
+        "p_up_tomorrow": 0.511,
+        "fwd5_med": 0.0012,
+        "fwd20_med": 0.0,
+        "fwd60_med": 0.005,
+        "fwd20_win": 0.5
       },
       {
         "k": 2,
         "cond_val": "收缩",
-        "n_obs": 70,
-        "merged": false,
-        "p_up_tomorrow": 0.6,
-        "fwd5_med": 0.0007,
-        "fwd20_med": -0.0101,
-        "fwd60_med": -0.0502,
-        "fwd20_win": 0.4
-      },
-      {
-        "k": 2,
-        "cond_val": "扩张",
-        "n_obs": 55,
-        "merged": false,
-        "p_up_tomorrow": 0.636,
-        "fwd5_med": 0.0071,
-        "fwd20_med": 0.0185,
-        "fwd60_med": 0.0249,
-        "fwd20_win": 0.582
-      },
-      {
-        "k": 2,
-        "cond_val": "谷",
-        "n_obs": 33,
-        "merged": false,
-        "p_up_tomorrow": 0.424,
-        "fwd5_med": 0.0004,
-        "fwd20_med": -0.0056,
-        "fwd60_med": 0.0185,
-        "fwd20_win": 0.485
-      },
-      {
-        "k": 2,
-        "cond_val": "峰",
         "n_obs": 47,
         "merged": false,
-        "p_up_tomorrow": 0.532,
-        "fwd5_med": -0.0026,
-        "fwd20_med": 0.009,
-        "fwd60_med": 0.0326,
-        "fwd20_win": 0.532
+        "p_up_tomorrow": 0.511,
+        "fwd5_med": -0.0013,
+        "fwd20_med": -0.0056,
+        "fwd60_med": -0.0375,
+        "fwd20_win": 0.489
+      },
+      {
+        "k": 2,
+        "cond_val": "扩张",
+        "n_obs": 611,
+        "merged": true,
+        "p_up_tomorrow": 0.501,
+        "fwd5_med": -0.0001,
+        "fwd20_med": -0.0034,
+        "fwd60_med": -0.0029,
+        "fwd20_win": 0.48
+      },
+      {
+        "k": 2,
+        "cond_val": "峰",
+        "n_obs": 38,
+        "merged": false,
+        "p_up_tomorrow": 0.605,
+        "fwd5_med": -0.0046,
+        "fwd20_med": 0.0042,
+        "fwd60_med": 0.0201,
+        "fwd20_win": 0.5
+      },
+      {
+        "k": 2,
+        "cond_val": "谷",
+        "n_obs": 611,
+        "merged": true,
+        "p_up_tomorrow": 0.501,
+        "fwd5_med": -0.0001,
+        "fwd20_med": -0.0034,
+        "fwd60_med": -0.0029,
+        "fwd20_win": 0.48
       },
       {
         "k": 3,
@@ -1012,7 +1012,7 @@
       },
       {
         "k": 3,
-        "cond_val": "谷",
+        "cond_val": "峰",
         "n_obs": 305,
         "merged": true,
         "p_up_tomorrow": 0.462,
@@ -1023,7 +1023,7 @@
       },
       {
         "k": 3,
-        "cond_val": "峰",
+        "cond_val": "谷",
         "n_obs": 305,
         "merged": true,
         "p_up_tomorrow": 0.462,
@@ -1056,7 +1056,7 @@
       },
       {
         "k": 4,
-        "cond_val": "谷",
+        "cond_val": "峰",
         "n_obs": 164,
         "merged": true,
         "p_up_tomorrow": 0.518,
@@ -1067,7 +1067,7 @@
       },
       {
         "k": 4,
-        "cond_val": "峰",
+        "cond_val": "谷",
         "n_obs": 164,
         "merged": true,
         "p_up_tomorrow": 0.518,
@@ -1100,7 +1100,7 @@
       },
       {
         "k": 5,
-        "cond_val": "谷",
+        "cond_val": "峰",
         "n_obs": 79,
         "merged": true,
         "p_up_tomorrow": 0.43,
@@ -1111,7 +1111,7 @@
       },
       {
         "k": 5,
-        "cond_val": "峰",
+        "cond_val": "谷",
         "n_obs": 79,
         "merged": true,
         "p_up_tomorrow": 0.43,
@@ -1125,147 +1125,158 @@
       {
         "k": 1,
         "cond_val": "扩张",
-        "n_obs": 424,
+        "n_obs": 358,
         "merged": false,
-        "p_up_tomorrow": 0.524,
-        "fwd5_med": 0.0014,
-        "fwd20_med": 0.006,
-        "fwd60_med": 0.012,
-        "fwd20_win": 0.545
-      },
-      {
-        "k": 1,
-        "cond_val": "峰",
-        "n_obs": 172,
-        "merged": false,
-        "p_up_tomorrow": 0.436,
-        "fwd5_med": -0.0098,
-        "fwd20_med": -0.0248,
-        "fwd60_med": -0.0584,
-        "fwd20_win": 0.39
+        "p_up_tomorrow": 0.511,
+        "fwd5_med": -0.0001,
+        "fwd20_med": 0.0073,
+        "fwd60_med": 0.0201,
+        "fwd20_win": 0.542
       },
       {
         "k": 1,
         "cond_val": "收缩",
-        "n_obs": 463,
+        "n_obs": 440,
         "merged": false,
-        "p_up_tomorrow": 0.501,
-        "fwd5_med": 0.0011,
-        "fwd20_med": -0.016,
-        "fwd60_med": -0.0175,
-        "fwd20_win": 0.436
+        "p_up_tomorrow": 0.5,
+        "fwd5_med": 0.002,
+        "fwd20_med": -0.0062,
+        "fwd60_med": -0.0059,
+        "fwd20_win": 0.47
+      },
+      {
+        "k": 1,
+        "cond_val": "峰",
+        "n_obs": 159,
+        "merged": false,
+        "p_up_tomorrow": 0.522,
+        "fwd5_med": 0.0071,
+        "fwd20_med": 0.0352,
+        "fwd60_med": 0.0116,
+        "fwd20_win": 0.566
       },
       {
         "k": 1,
         "cond_val": "谷",
-        "n_obs": 178,
+        "n_obs": 120,
         "merged": false,
-        "p_up_tomorrow": 0.562,
-        "fwd5_med": 0.0114,
-        "fwd20_med": 0.0353,
-        "fwd60_med": 0.1218,
-        "fwd20_win": 0.635
+        "p_up_tomorrow": 0.508,
+        "fwd5_med": 0.0016,
+        "fwd20_med": -0.0039,
+        "fwd60_med": 0.0071,
+        "fwd20_win": 0.467
       },
       {
         "k": 2,
         "cond_val": "扩张",
-        "n_obs": 201,
+        "n_obs": 176,
         "merged": false,
-        "p_up_tomorrow": 0.532,
-        "fwd5_med": 0.0024,
-        "fwd20_med": 0.0126,
-        "fwd60_med": 0.0159,
-        "fwd20_win": 0.562
-      },
-      {
-        "k": 2,
-        "cond_val": "峰",
-        "n_obs": 97,
-        "merged": false,
-        "p_up_tomorrow": 0.464,
-        "fwd5_med": -0.0067,
-        "fwd20_med": -0.0515,
-        "fwd60_med": -0.0492,
-        "fwd20_win": 0.34
+        "p_up_tomorrow": 0.489,
+        "fwd5_med": 0.0037,
+        "fwd20_med": 0.0202,
+        "fwd60_med": 0.0201,
+        "fwd20_win": 0.58
       },
       {
         "k": 2,
         "cond_val": "收缩",
-        "n_obs": 233,
+        "n_obs": 220,
         "merged": false,
-        "p_up_tomorrow": 0.485,
-        "fwd5_med": -0.0018,
-        "fwd20_med": -0.0156,
-        "fwd60_med": -0.0395,
+        "p_up_tomorrow": 0.509,
+        "fwd5_med": -0.0028,
+        "fwd20_med": -0.0131,
+        "fwd60_med": -0.0311,
+        "fwd20_win": 0.423
+      },
+      {
+        "k": 2,
+        "cond_val": "峰",
+        "n_obs": 76,
+        "merged": false,
+        "p_up_tomorrow": 0.592,
+        "fwd5_med": 0.0046,
+        "fwd20_med": -0.0263,
+        "fwd60_med": 0.0234,
+        "fwd20_win": 0.447
+      },
+      {
+        "k": 2,
+        "cond_val": "谷",
+        "n_obs": 58,
+        "merged": false,
+        "p_up_tomorrow": 0.466,
+        "fwd5_med": 0.0016,
+        "fwd20_med": -0.0016,
+        "fwd60_med": 0.0027,
+        "fwd20_win": 0.466
+      },
+      {
+        "k": 3,
+        "cond_val": "扩张",
+        "n_obs": 92,
+        "merged": false,
+        "p_up_tomorrow": 0.543,
+        "fwd5_med": 0.0032,
+        "fwd20_med": 0.0092,
+        "fwd60_med": -0.0073,
+        "fwd20_win": 0.543
+      },
+      {
+        "k": 3,
+        "cond_val": "收缩",
+        "n_obs": 107,
+        "merged": false,
+        "p_up_tomorrow": 0.374,
+        "fwd5_med": -0.0028,
+        "fwd20_med": -0.0227,
+        "fwd60_med": -0.0209,
+        "fwd20_win": 0.393
+      },
+      {
+        "k": 3,
+        "cond_val": "峰",
+        "n_obs": 31,
+        "merged": false,
+        "p_up_tomorrow": 0.516,
+        "fwd5_med": 0.0099,
+        "fwd20_med": 0.0031,
+        "fwd60_med": 0.0037,
+        "fwd20_win": 0.516
+      },
+      {
+        "k": 3,
+        "cond_val": "谷",
+        "n_obs": 31,
+        "merged": false,
+        "p_up_tomorrow": 0.516,
+        "fwd5_med": -0.0004,
+        "fwd20_med": 0.0086,
+        "fwd60_med": 0.0495,
+        "fwd20_win": 0.613
+      },
+      {
+        "k": 4,
+        "cond_val": "扩张",
+        "n_obs": 42,
+        "merged": false,
+        "p_up_tomorrow": 0.548,
+        "fwd5_med": -0.0024,
+        "fwd20_med": 0.002,
+        "fwd60_med": -0.0303,
+        "fwd20_win": 0.524
+      },
+      {
+        "k": 4,
+        "cond_val": "收缩",
+        "n_obs": 67,
+        "merged": false,
+        "p_up_tomorrow": 0.537,
+        "fwd5_med": -0.0072,
+        "fwd20_med": -0.0158,
+        "fwd60_med": -0.0231,
         "fwd20_win": 0.403
       },
       {
-        "k": 2,
-        "cond_val": "谷",
-        "n_obs": 77,
-        "merged": false,
-        "p_up_tomorrow": 0.519,
-        "fwd5_med": 0.009,
-        "fwd20_med": 0.0392,
-        "fwd60_med": 0.117,
-        "fwd20_win": 0.649
-      },
-      {
-        "k": 3,
-        "cond_val": "扩张",
-        "n_obs": 95,
-        "merged": false,
-        "p_up_tomorrow": 0.526,
-        "fwd5_med": -0.0017,
-        "fwd20_med": 0.0063,
-        "fwd60_med": -0.0096,
-        "fwd20_win": 0.558
-      },
-      {
-        "k": 3,
-        "cond_val": "峰",
-        "n_obs": 53,
-        "merged": false,
-        "p_up_tomorrow": 0.472,
-        "fwd5_med": -0.0117,
-        "fwd20_med": -0.0441,
-        "fwd60_med": -0.0443,
-        "fwd20_win": 0.358
-      },
-      {
-        "k": 3,
-        "cond_val": "收缩",
-        "n_obs": 117,
-        "merged": false,
-        "p_up_tomorrow": 0.393,
-        "fwd5_med": -0.0064,
-        "fwd20_med": -0.0269,
-        "fwd60_med": -0.027,
-        "fwd20_win": 0.402
-      },
-      {
-        "k": 3,
-        "cond_val": "谷",
-        "n_obs": 38,
-        "merged": false,
-        "p_up_tomorrow": 0.5,
-        "fwd5_med": 0.0102,
-        "fwd20_med": 0.0302,
-        "fwd60_med": 0.1366,
-        "fwd20_win": 0.658
-      },
-      {
-        "k": 4,
-        "cond_val": "扩张",
-        "n_obs": 45,
-        "merged": false,
-        "p_up_tomorrow": 0.556,
-        "fwd5_med": 0.0091,
-        "fwd20_med": 0.0133,
-        "fwd60_med": -0.0067,
-        "fwd20_win": 0.644
-      },
-      {
         "k": 4,
         "cond_val": "峰",
         "n_obs": 164,
@@ -1275,17 +1286,6 @@
         "fwd20_med": -0.0051,
         "fwd60_med": -0.0232,
         "fwd20_win": 0.451
-      },
-      {
-        "k": 4,
-        "cond_val": "收缩",
-        "n_obs": 72,
-        "merged": false,
-        "p_up_tomorrow": 0.514,
-        "fwd5_med": -0.0057,
-        "fwd20_med": -0.0152,
-        "fwd60_med": -0.0331,
-        "fwd20_win": 0.361
       },
       {
         "k": 4,
@@ -1311,6 +1311,17 @@
       },
       {
         "k": 5,
+        "cond_val": "收缩",
+        "n_obs": 31,
+        "merged": false,
+        "p_up_tomorrow": 0.419,
+        "fwd5_med": -0.0115,
+        "fwd20_med": -0.0203,
+        "fwd60_med": -0.0497,
+        "fwd20_win": 0.323
+      },
+      {
+        "k": 5,
         "cond_val": "峰",
         "n_obs": 79,
         "merged": true,
@@ -1319,17 +1330,6 @@
         "fwd20_med": -0.0229,
         "fwd60_med": -0.0278,
         "fwd20_win": 0.405
-      },
-      {
-        "k": 5,
-        "cond_val": "收缩",
-        "n_obs": 35,
-        "merged": false,
-        "p_up_tomorrow": 0.486,
-        "fwd5_med": -0.0095,
-        "fwd20_med": -0.0343,
-        "fwd60_med": -0.0278,
-        "fwd20_win": 0.371
       },
       {
         "k": 5,
@@ -1346,60 +1346,59 @@
   },
   "anti_overfit": {
     "reality_check": {
-      "obs_best_mean_daily": -0.00012,
-      "rc_p_value": 0.51,
+      "obs_best_mean_daily": -0.000311,
+      "rc_p_value": 0.557,
       "significant_5pct": false
     },
     "dsr": {
-      "sr_best_period": 0.04034,
-      "sr_annualized": 0.63,
-      "v_sr_across_trials": 0.000322,
-      "sr0": 0.02333,
-      "dsr": 0.7403,
+      "sr_best_period": 0.01119,
+      "sr_annualized": 0.175,
+      "v_sr_across_trials": 6.6e-05,
+      "sr0": 0.01054,
+      "dsr": 0.5099,
       "n_trials": 6,
       "pass_090": false
     },
-    "pbo": 0.2749
+    "pbo": 0.7284
   },
   "validation_eval": {
-    "ann_return": 0.0929,
+    "ann_return": 0.0132,
     "index_ann_return": 0.0022,
-    "ann_excess": 0.0907,
-    "max_drawdown": -0.3422,
-    "sharpe": 0.612,
-    "n_trades": 18,
-    "roll126_win_vs_index": 0.413,
-    "roll126_win_abs4_or_ex3": 0.515,
-    "roll126_avg_excess": 0.028,
+    "ann_excess": 0.011,
+    "max_drawdown": -0.3898,
+    "sharpe": 0.162,
+    "n_trades": 4,
+    "roll126_win_vs_index": 0.266,
+    "roll126_win_abs4_or_ex3": 0.292,
+    "roll126_avg_excess": -0.0189,
     "roll126_worst": -0.2545,
     "min_hold_violations": 0
   },
   "test_eval": {
-    "ann_return": 0.047,
-    "index_ann_return": -0.0788,
-    "ann_excess": 0.1258,
-    "max_drawdown": -0.3288,
-    "sharpe": 0.36,
-    "n_trades": 3,
-    "roll126_win_vs_index": 0.427,
-    "roll126_win_abs4_or_ex3": 0.52,
-    "roll126_avg_excess": 0.0498,
+    "ann_return": -0.0482,
+    "index_ann_return": -0.0801,
+    "ann_excess": 0.0319,
+    "max_drawdown": -0.4607,
+    "sharpe": -0.134,
+    "n_trades": 1,
+    "roll126_win_vs_index": 0.126,
+    "roll126_win_abs4_or_ex3": 0.24,
+    "roll126_avg_excess": 0.0133,
     "roll126_worst": -0.2318,
-    "min_hold_violations": 0,
-    "deferred_sells_total": 0
+    "min_hold_violations": 0
   },
   "test_eval_bh": {
-    "ann_return": -0.0696,
-    "index_ann_return": -0.0696,
+    "ann_return": -0.0801,
+    "index_ann_return": -0.0801,
     "ann_excess": 0.0,
     "max_drawdown": -0.4607,
-    "sharpe": -0.209,
+    "sharpe": -0.261,
     "n_trades": 0,
     "roll126_win_vs_index": 0.0,
-    "roll126_win_abs4_or_ex3": 0.168,
+    "roll126_win_abs4_or_ex3": 0.164,
     "roll126_avg_excess": 0.0,
     "roll126_worst": -0.2643,
     "min_hold_violations": 0
   },
-  "degraded": false
+  "degraded": true
 }

@@ -182,6 +182,20 @@ def run_backtest(sig: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp,
             "deferred_sells": deferred_sells, "metrics": metrics}
 
 
+def window_metrics(bt: dict, start: pd.Timestamp, end: pd.Timestamp) -> dict:
+    """全历史回测结果按窗口切指标。
+
+    不要用 run_backtest(sig, start, end) 评估子窗口：它从零仓位起步，窗口起点的
+    既有持仓会被静默丢弃（2026-10-24 模型审查发现 as-of 口径下 2022 测试段因此
+    漏掉整段继承持仓，年化虚增约 8 个百分点）。正确做法：全历史跑一遍回测，
+    再用本函数切窗口收益与窗口内开仓的交易计算指标。
+    """
+    state = bt["state"]
+    mask = (state.index >= start) & (state.index <= end)
+    trades = [t for t in bt["trades"] if start <= t["buy_date"] <= end]
+    return compute_metrics(state["strat_ret"][mask], state["index_ret"][mask], trades)
+
+
 def compute_metrics(strat_ret: pd.Series, index_ret: pd.Series,
                     trades: list[dict] | None = None) -> dict:
     """在任意窗口上计算绩效指标（校准脚本对子训练/验证/测试段复用）。"""

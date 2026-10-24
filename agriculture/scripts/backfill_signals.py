@@ -58,6 +58,11 @@ def main() -> None:
     # pending 卖出被 7 天规则顺延的日期没有事件行，alert 逻辑按状态推导
     mk = tables["markov"]
     conn = sqlite3.connect(str(DB_PATH))
+    # 2026-10-24：清掉旧口径（全样本 HP，带前视）的回填行后重建；
+    # 实盘行（is_live=1）由下方"已存在即跳过"保护，不受影响。
+    deleted = conn.execute("DELETE FROM signals WHERE is_live=0").rowcount
+    conn.commit()
+    print(f"清除旧口径回填行 {deleted} 行（is_live=0）")
     n_ins = n_skip = 0
     for t, row in state.iterrows():
         date_str = str(t.date())
