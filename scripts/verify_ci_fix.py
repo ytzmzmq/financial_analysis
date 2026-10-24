@@ -7,6 +7,7 @@
 import importlib.util
 import io
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,56 @@ except RuntimeError as e:
     check("异常信息含接口名（可定位）", "index_hist_sw(801150)" in str(e), True)
 except Exception as e:  # noqa: BLE001
     check("异常类型", type(e).__name__, "RuntimeError")
+
+print()
+print("=" * 66)
+print("D. 预检闸门 scripts/should_run_today.py —— 按「最近交易日」去重")
+print("=" * 66)
+spec2 = importlib.util.spec_from_file_location(
+    "preflight_under_test", REPO / "scripts" / "should_run_today.py")
+srt = importlib.util.module_from_spec(spec2)
+sys.modules["preflight_under_test"] = srt
+spec2.loader.exec_module(srt)
+from datetime import datetime, timedelta  # noqa: E402
+
+
+def make_db(tmp, dates):
+    """建一个含指定日期行的最小 signals.db，模拟真实数据源。"""
+    db = Path(tmp) / "signals.db"
+    db.unlink(missing_ok=True)  # 每个 case 重建，避免表已存在
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE signals (date TEXT PRIMARY KEY, score REAL)")
+    con.executemany("INSERT INTO signals VALUES (?, 0)", [(d,) for d in dates])
+    con.commit()
+    con.close()
+    return db
+
+
+def gate(tmp, dates, now_str):
+    """带一个数据源的预检决策：返回 (run, 目标日)。"""
+    db = make_db(tmp, dates)
+    run, target, _ = srt.decide(datetime.fromisoformat(now_str).replace(tzinfo=srt.BEIJING), (db,))
+    return run, target.isoformat()
+
+
+tmp = tempfile.mkdtemp()
+MON_1012, TUE_1013 = "2026-10-12", "2026-10-13"
+check("尾盘时刻（周三 14:52）当日无信号 → 运行",
+      gate(tmp, ["2026-10-09"], "2026-10-14T14:52:00")[0], "true")
+check("尾盘时刻当日已有信号 → 跳过",
+      gate(tmp, ["2026-10-14"], "2026-10-14T14:52:00")[0], "false")
+check("晚间兜底（22:36）当日已有信号 → 跳过",
+      gate(tmp, ["2026-10-14"], "2026-10-14T22:36:00")[0], "false")
+# 2026-10-12 实际事故：schedule 跨过北京午夜（10-13 00:11 运行），10-12 已有尾盘信号
+check("跨午夜补跑（10-13 00:11）上一交易日已有信号 → 跳过（10-12 事故回归）",
+      gate(tmp, [MON_1012], "2026-10-13T00:11:00"), ("false", MON_1012))
+check("跨午夜补跑上一交易日无信号（当日 dispatch 失败/未推送）→ 放行自愈",
+      gate(tmp, ["2026-10-09"], "2026-10-13T00:11:00"), ("true", MON_1012))
+check("周六午后运行 → 目标日回退到周五，已有信号则跳过",
+      gate(tmp, ["2026-10-23"], "2026-10-24T15:00:00"), ("false", "2026-10-23"))
+check("周日清晨运行 → 目标日为上周五",
+      gate(tmp, ["2026-10-16"], "2026-10-18T09:00:00"), ("false", "2026-10-16"))
+shutil.rmtree(tmp, ignore_errors=True)
 
 print()
 print("=" * 66)
